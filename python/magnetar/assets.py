@@ -25,11 +25,11 @@ def hud_font_resource():
     return files("magnetar").joinpath(*HUD_FONT_RESOURCE.split("/"))
 
 
-class AssetFontSession:
-    """Keep a packaged font file available as a real filesystem path.
+class AssetSession:
+    """Context manager yielding a real filesystem path to a packaged resource.
 
-    Wraps :func:`importlib.resources.as_file` so zip/egg installs still work.
-    Use as a context manager, or call :meth:`open` / :meth:`close` for app lifetime.
+    Wraps :func:`importlib.resources.as_file` so zip/wheel installs still work.
+    Prefer ``with packaged_asset(...) as path:`` / ``with hud_font_path() as path:``.
     """
 
     def __init__(self, *resource_parts: str) -> None:
@@ -37,20 +37,11 @@ class AssetFontSession:
         self._stack = ExitStack()
         self.path: Path | None = None
 
-    def open(self) -> Path:
-        if self.path is not None:
-            return self.path
+    def __enter__(self) -> Path:
         traversable = files("magnetar").joinpath(*self._parts)
         path = self._stack.enter_context(as_file(traversable))
         self.path = Path(path)
         return self.path
-
-    def close(self) -> None:
-        self._stack.close()
-        self.path = None
-
-    def __enter__(self) -> Path:
-        return self.open()
 
     def __exit__(
         self,
@@ -58,9 +49,15 @@ class AssetFontSession:
         exc: Optional[BaseException],
         tb: Optional[TracebackType],
     ) -> None:
-        self.close()
+        self._stack.close()
+        self.path = None
 
 
-def hud_font_session() -> AssetFontSession:
-    """Session for the default bold HUD font baked into the package."""
-    return AssetFontSession(*HUD_FONT_RESOURCE.split("/"))
+def packaged_asset(*resource_parts: str) -> AssetSession:
+    """Context manager for an arbitrary path under the ``magnetar`` package."""
+    return AssetSession(*resource_parts)
+
+
+def hud_font_path() -> AssetSession:
+    """Context manager for the default bold HUD font file path."""
+    return AssetSession(*HUD_FONT_RESOURCE.split("/"))
