@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: CC0-1.0
 """magnetar — electric particle simulator in 3D space."""
 
 from magnetar.units import (

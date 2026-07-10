@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: CC0-1.0
 """3D simulation space holding particles."""
 
 from __future__ import annotations

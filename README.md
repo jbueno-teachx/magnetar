@@ -54,3 +54,7 @@ active path is pure Python.
 This system has Mesa/NVIDIA libGL and pygame can open an `OPENGL` display.
 Optional: `pip install -e ".[opengl]"` for PyOpenGL bindings. The default view
 uses the software 2D surface path for now.
+
+## License
+
+Public domain dedication via [CC0-1.0](https://creativecommons.org/publicdomain/zero/1.0/) (SPDX: `CC0-1.0`).

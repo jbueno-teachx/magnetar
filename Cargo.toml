@@ -3,7 +3,7 @@ name = "magnetar"
 version = "0.1.0"
 edition = "2021"
 description = "Rust core for the magnetar Python package"
-license = "MIT"
+license = "CC0-1.0"
 publish = false
 
 [lib]

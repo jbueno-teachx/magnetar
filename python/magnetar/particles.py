@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: CC0-1.0
 """Particle types for the magnetar simulation."""
 
 from __future__ import annotations

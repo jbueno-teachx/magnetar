@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: CC0-1.0
 use pyo3::prelude::*;
 
 /// Add two integers (Rust implementation).

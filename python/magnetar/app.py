@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: CC0-1.0
 """Magnetar application: pygame 2D view of the 3D particle world.
 
 View options are hardcoded here for now; camera and simulation controls

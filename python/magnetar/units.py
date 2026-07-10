@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: CC0-1.0
 """Physical magnitudes as distinct float types.
 
 These are zero-cost at runtime (``NewType`` wrappers around ``float``) but give

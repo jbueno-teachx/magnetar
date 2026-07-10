@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: CC0-1.0
 """Type stubs for magnetar."""
 
 from magnetar.units import (

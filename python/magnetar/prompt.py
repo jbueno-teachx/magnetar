@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: CC0-1.0
 """Interactive stdin prompt for controlling the simulation space."""
 
 from __future__ import annotations
