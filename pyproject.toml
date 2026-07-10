@@ -1,0 +1,58 @@
+[build-system]
+requires = [
+    "setuptools>=68",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "magnetar"
+version = "0.1.0"
+description = "Electric and magnetic particle simulator in 3D space"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "magnetar contributors" }]
+keywords = ["physics", "simulation", "electromagnetism", "pygame", "particles"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pygame-ce>=2.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "ruff>=0.4",
+]
+# Optional GPU path; system has libGL and pygame OPENGL works without PyOpenGL.
+opengl = [
+    "PyOpenGL>=3.1",
+]
+
+[project.scripts]
+magnetar = "magnetar.app:main"
+
+[project.urls]
+Repository = "https://github.com/example/magnetar"
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.setuptools.package-data]
+magnetar = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["python"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"

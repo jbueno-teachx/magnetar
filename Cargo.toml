@@ -1,0 +1,18 @@
+[package]
+name = "magnetar"
+version = "0.1.0"
+edition = "2021"
+description = "Rust core for the magnetar Python package"
+license = "MIT"
+publish = false
+
+[lib]
+name = "_magnetar"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
+
+[profile.release]
+lto = true
+codegen-units = 1

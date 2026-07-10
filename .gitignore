@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env314/
+.env
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.so
+
+# Rust
+/target/
+**/*.rs.bk
+# Cargo.lock is tracked for reproducible extension builds
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
