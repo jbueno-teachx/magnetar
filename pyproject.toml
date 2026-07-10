@@ -45,11 +45,14 @@ magnetar = "magnetar.app:main"
 [project.urls]
 Repository = "https://github.com/jbueno-teachx/magnetar"
 
+[tool.setuptools]
+include-package-data = true
+
 [tool.setuptools.packages.find]
 where = ["python"]
 
 [tool.setuptools.package-data]
-magnetar = ["py.typed"]
+magnetar = ["py.typed", "assets/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

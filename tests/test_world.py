@@ -114,9 +114,10 @@ def test_unit_constructors() -> None:
 
 
 def test_project_origin_is_center() -> None:
-    from magnetar.app import VIEW_HEIGHT, VIEW_WIDTH, project
+    from magnetar.app import VIEW_HEIGHT, VIEW_WIDTH, MagnetarApp
 
-    (sx, sy), depth = project(meters(0.0, 0.0, 0.0), width=VIEW_WIDTH, height=VIEW_HEIGHT)
-    assert sx == VIEW_WIDTH * 0.5
-    assert sy == VIEW_HEIGHT * 0.5
+    app = MagnetarApp()
+    (u, v), depth = app.project(meters(0.0, 0.0, 0.0), width=VIEW_WIDTH, height=VIEW_HEIGHT)
+    assert u == VIEW_WIDTH * 0.5
+    assert v == VIEW_HEIGHT * 0.5
     assert depth == 0.0

@@ -1,0 +1,5 @@
+# Ensure non-Python package data is included in sdist/tarballs.
+recursive-include python/magnetar/assets *
+include LICENSE
+include README.md
+include pyproject.toml
