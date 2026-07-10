@@ -5,8 +5,6 @@ View options are hardcoded here for now; camera and simulation controls
 will grow around these defaults.
 """
 
-from __future__ import annotations
-
 import math
 import os
 import sys
@@ -95,6 +93,8 @@ class MagnetarApp:
     def __init__(self, world_factory: WorldFactory = create_world) -> None:
         self.world_factory = world_factory
         self.world: World = world_factory()
+        # World keeps the app via a per-instance ContextVar (Particle → World → App).
+        self.world.bind_app(self)
         self.prompt = InteractivePrompt(self.world)
 
         # View / camera state (mutable; in-window controls will drive these).
@@ -102,6 +102,7 @@ class MagnetarApp:
         self.world_rotation: Vec3f = WORLD_ROTATION
         self.world_scale: float = WORLD_SCALE
         self.perspective: float = PERSPECTIVE
+        self.particle_radius_px: int = PARTICLE_RADIUS_PX
 
         # pygame resources (filled in by start / _init_pygame)
         self.screen: pygame.Surface | None = None

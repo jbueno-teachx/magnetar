@@ -15,8 +15,6 @@ Convention used in magnetar
 * potential       → :class:`Volt`
 """
 
-from __future__ import annotations
-
 from typing import NewType, SupportsFloat, Tuple
 
 # ---------------------------------------------------------------------------

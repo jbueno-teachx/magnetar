@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: CC0-1.0
 """Access packaged static assets via :mod:`importlib.resources`."""
 
-from __future__ import annotations
-
 from contextlib import ExitStack
 from importlib.resources import as_file, files
 from pathlib import Path

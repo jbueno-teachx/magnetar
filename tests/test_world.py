@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: CC0-1.0
 import pytest
+import pygame
 
 from magnetar.particles import ElectroParticle, Particle
 from magnetar.units import (
@@ -22,6 +23,10 @@ from magnetar.units import (
 from magnetar.world import World
 
 
+def _first(world: World) -> Particle:
+    return next(iter(world.particles))  # type: ignore[return-value]
+
+
 def test_add_electro_and_step() -> None:
     world = World()
     p = world.add_electro(
@@ -31,14 +36,16 @@ def test_add_electro_and_step() -> None:
         velocity=(1.0, 0.0, 0.0),  # m/s
     )
     assert isinstance(p, ElectroParticle)
+    assert isinstance(p, pygame.sprite.Sprite)
     assert p.charge == coulomb(1.0)
     assert p.mass == gram(2.0)
     assert p.position == meters(0.0, 0.0, 0.0)
     assert p.pinned is False
     assert p.world is world
+    assert p in world.particles
     assert len(world) == 1
     world.step(second(0.5))
-    assert world.particles[0].position == meters(0.5, 0.0, 0.0)
+    assert _first(world).position == meters(0.5, 0.0, 0.0)
     assert world.time == second(0.5)
 
 
@@ -77,13 +84,15 @@ def test_setting_pinned_zeroes_velocity() -> None:
     assert p.position == meters(9.0, 8.0, 7.0)
 
 
-def test_weakref_to_world() -> None:
+def test_weakref_to_world_and_kill_on_clear() -> None:
     world = World()
     p = world.add_particle(meters(0, 1, 0), mass=gram(3.5))
     assert p.world is world
+    assert len(p.groups()) == 1
     world.clear()
     assert p.world is None
     assert len(world) == 0
+    assert len(p.groups()) == 0  # kill() removed it from the group
 
 
 def test_base_particle_has_mass() -> None:
@@ -94,6 +103,25 @@ def test_base_particle_has_mass() -> None:
     assert p.mass == gram(3.5)
     assert grams_to_kg(p.mass) == 0.0035
     assert p.y == meter(1.0)
+
+
+def test_app_contextvar_and_particle_rect() -> None:
+    from magnetar.app import VIEW_HEIGHT, VIEW_WIDTH, MagnetarApp, PARTICLE_RADIUS_PX
+
+    app = MagnetarApp()
+    assert app.world.app is app
+    assert isinstance(app.world.app_var, __import__("contextvars").ContextVar)
+
+    # Demo world has particles already bound through the app.
+    p = next(iter(app.world.particles))
+    assert isinstance(p, Particle)
+    r = p.rect()
+    assert isinstance(r, pygame.Rect)
+    assert r.width == PARTICLE_RADIUS_PX * 2
+    assert r.height == PARTICLE_RADIUS_PX * 2
+    (u, v), _ = app.project(p.position, width=VIEW_WIDTH, height=VIEW_HEIGHT)
+    assert r.centerx == int(round(u))
+    assert r.centery == int(round(v))
 
 
 def test_unit_constructors() -> None:

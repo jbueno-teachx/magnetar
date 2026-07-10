@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: CC0-1.0
 """Particle types for the magnetar simulation."""
 
-from __future__ import annotations
-
+import os
 import weakref
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional, Tuple
+
+# Avoid grabbing the host audio device if something initializes pygame fully.
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+
+import pygame
 
 from magnetar.units import (
     Coulomb,
@@ -30,34 +33,22 @@ ZERO_VELOCITY: Velocity3 = (0.0, 0.0, 0.0)
 DEFAULT_MASS: Gram = gram(1.0)
 DEFAULT_CHARGE: Coulomb = coulomb(1.0)
 
+# Fallback screen radius (pixels) when the app is not reachable.
+DEFAULT_SCREEN_RADIUS_PX = 8
+
 
 def _as_velocity(value: Velocity3 | Tuple[float, float, float]) -> Velocity3:
     return (float(value[0]), float(value[1]), float(value[2]))
 
 
-@dataclass
-class Particle:
-    """A particle in 3D space.
+class Particle(pygame.sprite.Sprite):
+    """A particle in 3D space (also a pygame Sprite for group membership).
 
     ``position`` is in meters and remains writable even when pinned. If
     ``pinned`` is true, the particle does not integrate motion and only
     contributes to fields; attempts to assign ``velocity`` raise
     ``ValueError``. Setting ``pinned = True`` zeroes velocity immediately.
     """
-
-    position: Position
-    mass: Gram = DEFAULT_MASS
-    label: str = ""
-    # Display color override (RGB 0–255); None → theme default in the view.
-    color: Tuple[int, int, int] | None = field(default=None)
-    _velocity: Velocity3 = field(default=ZERO_VELOCITY, repr=False, compare=True)
-    _pinned: bool = field(default=False, repr=False, compare=True)
-    _world_ref: Optional[weakref.ReferenceType[World]] = field(
-        default=None, repr=False, compare=False, hash=False
-    )
-
-    # Public constructor aliases (dataclass field names stay private).
-    # Use keywords: Particle(pos, velocity=..., pinned=...)
 
     def __init__(
         self,
@@ -70,15 +61,18 @@ class Particle:
         *,
         world: World | None = None,
     ) -> None:
+        super().__init__()
         self.position = as_position(position)
         self.mass = gram(mass)
         self.label = label
         self.color = color
         self._pinned = bool(pinned)
         self._velocity = ZERO_VELOCITY if self._pinned else _as_velocity(velocity)
-        self._world_ref = weakref.ref(world) if world is not None else None
+        self._world_ref: Optional[weakref.ReferenceType[World]] = (
+            weakref.ref(world) if world is not None else None
+        )
 
-    # -- world back-reference -------------------------------------------------
+    # -- world / app back-references ------------------------------------------
 
     @property
     def world(self) -> World | None:
@@ -119,6 +113,30 @@ class Particle:
             raise ValueError("cannot change velocity of a pinned particle")
         self._velocity = _as_velocity(value)
 
+    # -- screen geometry (Particle → World → App) -----------------------------
+
+    def rect(self) -> pygame.Rect:
+        """Axis-aligned screen bounding box from projected ``(u, v)``.
+
+        Walks Particle → World → App (via the world's instance ContextVar)
+        and uses :meth:`~magnetar.app.MagnetarApp.project` for the center.
+        """
+        world = self.world
+        if world is None:
+            raise RuntimeError("particle is not attached to a world")
+        app = world.app
+        if app is None:
+            raise RuntimeError("world has no app bound (ContextVar empty)")
+
+        (u, v), _depth = app.project(self.position)
+        radius = int(getattr(app, "particle_radius_px", DEFAULT_SCREEN_RADIUS_PX))
+        return pygame.Rect(
+            int(round(u)) - radius,
+            int(round(v)) - radius,
+            radius * 2,
+            radius * 2,
+        )
+
     # -- kinematics -----------------------------------------------------------
 
     def integrate(self, dt: Second | float) -> None:
@@ -147,11 +165,8 @@ class Particle:
         return self.position[2]
 
 
-@dataclass
 class ElectroParticle(Particle):
     """Charged particle. Responds to electric and magnetic fields when free."""
-
-    charge: Coulomb = DEFAULT_CHARGE
 
     def __init__(
         self,
