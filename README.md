@@ -5,7 +5,7 @@ and an interactive terminal prompt.
 
 ## Requirements
 
-- Python 3.9+ (developed on 3.14)
+- Python 3.14+
 - A display for the pygame window
 
 ## Setup
