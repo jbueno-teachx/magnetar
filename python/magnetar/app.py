@@ -125,6 +125,7 @@ class MagnetarApp:
         self.clock: pygame.time.Clock | None = None
         self.font: pygame.font.Font | None = None
         self.running: bool = False
+        self.tick: int = 0  # animation clock; ScreenSprite wraps frames with this
 
         # In-window UI (registry filled after pygame init when surfaces exist).
         self.widgets = WidgetRegistry()
@@ -161,6 +162,7 @@ class MagnetarApp:
             self.world.step(dt)
             self.render_frame()
             pygame.display.flip()
+            self.tick += 1
         return 0
 
     def events(self) -> None:

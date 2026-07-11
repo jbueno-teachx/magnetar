@@ -125,6 +125,72 @@ class ParticleImageBank:
             self._ensure_master(variant, frame=0, tag=None)
         self._loaded_defaults = True
 
+    def frame_count(self, color: str, *, tag: str | None = None) -> int:
+        """How many animation frames exist for this color (and optional tag).
+
+        Counts consecutive frame-indexed assets starting at 0
+        (``…_f000.png``, ``…/frame_000.png``, …). If none exist but a still
+        ``particle_{color}.png`` is present, returns 1.
+        """
+        color = str(color).strip().lower().replace(" ", "_")
+        cache_key = (color, tag or "")
+        counts = getattr(self, "_frame_counts", None)
+        if counts is None:
+            self._frame_counts = {}
+            counts = self._frame_counts
+        if cache_key in counts:
+            return counts[cache_key]
+
+        n = 0
+        while self._has_explicit_frame(color, frame=n, tag=tag):
+            n += 1
+        if n == 0 and self._has_still(color, tag=tag):
+            n = 1
+        if n < 1:
+            n = 1
+        counts[cache_key] = n
+        return n
+
+    def _has_still(self, color: str, *, tag: str | None) -> bool:
+        from importlib.resources import files
+
+        rels: list[str] = []
+        if tag:
+            rels.append(f"assets/particles/particle_{color}_{tag}.png")
+        rels.append(f"assets/particles/particle_{color}.png")
+        root = files("magnetar")
+        for rel in rels:
+            node = root
+            for part in rel.split("/"):
+                node = node / part
+            try:
+                if node.is_file():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _has_explicit_frame(self, color: str, *, frame: int, tag: str | None) -> bool:
+        """True if a frame-indexed asset exists (not the plain still fallback)."""
+        from importlib.resources import files
+
+        rels: list[str] = []
+        if tag:
+            rels.append(f"assets/particles/particle_{color}_{tag}_f{frame:03d}.png")
+        rels.append(f"assets/particles/particle_{color}_f{frame:03d}.png")
+        rels.append(f"assets/particles/{color}/frame_{frame:03d}.png")
+        root = files("magnetar")
+        for rel in rels:
+            node = root
+            for part in rel.split("/"):
+                node = node / part
+            try:
+                if node.is_file():
+                    return True
+            except Exception:
+                continue
+        return False
+
     def get(
         self,
         color: str,

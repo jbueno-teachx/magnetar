@@ -35,6 +35,8 @@ ZERO_VELOCITY: Velocity3 = (0.0, 0.0, 0.0)
 DEFAULT_MASS: Gram = gram(1.0)
 DEFAULT_CHARGE: Coulomb = coulomb(1.0)
 DEFAULT_SCREEN_RADIUS_PX = 8
+# App ticks per animation frame advance (higher = slower spin).
+TICKS_PER_SPRITE_FRAME = 5
 
 
 def _as_velocity(value: Velocity3 | Tuple[float, float, float]) -> Velocity3:
@@ -83,17 +85,32 @@ class ScreenSprite(pygame.sprite.Sprite):
 
     @property
     def image(self) -> pygame.Surface:
-        """Current frame surface for this particle's color (scaled to sim diameter)."""
+        """Current frame surface for this particle's color (scaled to sim diameter).
+
+        Animation index is ``app.tick`` slowed by ``TICKS_PER_SPRITE_FRAME``
+        (default 5 ticks per frame change), plus optional ``sprite_frame`` base
+        offset, wrapped with ``frame % bank.frame_count(color)``.
+        """
         color = getattr(self, "color", DEFAULT_PARTICLE_COLOR)
-        frame = int(getattr(self, "sprite_frame", 0) or 0)
         tag = getattr(self, "sprite_tag", None)
+        base = int(getattr(self, "sprite_frame", 0) or 0)
         try:
             app = self._require_app()
             radius = int(getattr(app, "particle_radius_px", DEFAULT_SCREEN_RADIUS_PX))
+            tick = int(getattr(app, "tick", 0) or 0)
+            ticks_per = int(
+                getattr(app, "ticks_per_sprite_frame", TICKS_PER_SPRITE_FRAME)
+                or TICKS_PER_SPRITE_FRAME
+            )
         except RuntimeError:
             radius = DEFAULT_SCREEN_RADIUS_PX
+            tick = 0
+            ticks_per = TICKS_PER_SPRITE_FRAME
         size_px = max(1, radius * 2)
         bank = ParticleImageBank.shared()
+        n_frames = bank.frame_count(color, tag=tag)
+        anim = tick // max(1, ticks_per)
+        frame = (base + anim) % max(1, n_frames)
         try:
             return bank.get(color, size_px=size_px, frame=frame, tag=tag)
         except FileNotFoundError:
