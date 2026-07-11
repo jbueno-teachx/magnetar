@@ -35,6 +35,10 @@ class MockApp:
     height: int = 768
     name: str = "mock"
 
+    def __post_init__(self) -> None:
+        # ScreenSprite.rect looks up app.view.project (or app.project).
+        self.view = self
+
     def project(
         self,
         point: Sequence[float],
@@ -81,11 +85,11 @@ def test_same_world_rebound_to_apps_with_different_scale() -> None:
 
     world.bind_app(app_small)
     assert world.app is app_small
-    rect_small = particle.rect()
+    rect_small = particle.rect
 
     world.bind_app(app_large)
     assert world.app is app_large
-    rect_large = particle.rect()
+    rect_large = particle.rect
 
     # Same world-space point; larger scale → farther from screen center in u.
     center_u = app_small.width * 0.5
@@ -105,11 +109,11 @@ def test_same_world_rebound_with_different_rotation() -> None:
 
     world.bind_app(app_id)
     (u0, v0), _ = app_id.project(particle.position)
-    rect0 = particle.rect()
+    rect0 = particle.rect
 
     world.bind_app(app_yaw)
     (u1, v1), _ = app_yaw.project(particle.position)
-    rect1 = particle.rect()
+    rect1 = particle.rect
 
     assert (u0, v0) != (u1, v1)
     assert (rect0.centerx, rect0.centery) != (rect1.centerx, rect1.centery)
@@ -132,7 +136,7 @@ def test_same_context_last_bind_wins_not_simultaneous() -> None:
     assert world.app is not app_a
     # rect always uses the single current binding
     (u_b, _), _ = app_b.project(particle.position)
-    assert particle.rect().centerx == int(round(u_b))
+    assert particle.rect.centerx == int(round(u_b))
 
 
 def test_bind_app_token_restores_previous_app() -> None:
@@ -148,7 +152,7 @@ def test_bind_app_token_restores_previous_app() -> None:
     world.app_var.reset(token)
     assert world.app is app_a
     (u_a, _), _ = app_a.project(particle.position)
-    assert particle.rect().centerx == int(round(u_a))
+    assert particle.rect.centerx == int(round(u_a))
 
 
 def test_isolated_contexts_allow_different_apps_on_same_world() -> None:
@@ -164,7 +168,7 @@ def test_isolated_contexts_allow_different_apps_on_same_world() -> None:
 
     def view_with(app: MockApp) -> tuple[int, object]:
         world.bind_app(app)
-        r = particle.rect()
+        r = particle.rect
         return r.centerx, world.app
 
     ctx_a = contextvars.Context()

@@ -21,6 +21,7 @@ from magnetar.assets import DEFAULT_HUD_FONT_SIZE, hud_font_path
 from magnetar.particles import ElectroParticle, Particle
 from magnetar.prompt import InteractivePrompt
 from magnetar.units import coulomb, gram, meters, second
+from magnetar.view3d import IDENTITY_MAT3, ViewCamera
 from magnetar.widgets import DragImageButton, WidgetRegistry, make_curved_arrows_icon
 from magnetar.world import World
 
@@ -47,7 +48,7 @@ CAMERA_OFFSET = (0.0, 0.0, 0.0)
 WORLD_ROTATION = (0.0, 0.0, 0.0)  # legacy Euler seed (yaw, pitch, roll)
 
 # Particle drawing
-PARTICLE_RADIUS_PX = 8
+PARTICLE_RADIUS_PX = 16
 ELECTRO_COLOR = THEME_COLOR
 BOUND_COLOR = (255, 200, 64)  # fixed field sources
 NEUTRAL_COLOR = (160, 160, 160)
@@ -66,15 +67,7 @@ ROTATE_WIDGET_Y_PCT = 100.0 - ROTATE_WIDGET_H_PCT - 2.0  # 2% margin from bottom
 
 Vec2 = Tuple[float, float]
 Vec3f = Tuple[float, float, float]
-# Row-major 3×3: view_coords = R @ world_coords (about the look-at origin).
-Mat3 = Tuple[Vec3f, Vec3f, Vec3f]
 WorldFactory = Callable[[], World]
-
-_IDENTITY_MAT3: Mat3 = (
-    (1.0, 0.0, 0.0),
-    (0.0, 1.0, 0.0),
-    (0.0, 0.0, 1.0),
-)
 
 
 def create_world() -> World:
@@ -85,6 +78,7 @@ def create_world() -> World:
         meters(-2.0, 0.0, 0.0),
         charge=coulomb(1.0),
         mass=gram(1.0),
+        color="yellow",
         label="E+",
     )
     world.add_electro(
@@ -92,6 +86,7 @@ def create_world() -> World:
         charge=coulomb(-1.0),
         mass=gram(1.0),
         velocity=(-0.2, 0.1, 0.0),  # m/s
+        color="light_blue",
         label="E-",
     )
     # Bound charge: fixed in place, field source only.
@@ -100,6 +95,7 @@ def create_world() -> World:
         charge=coulomb(2.0),
         mass=gram(5.0),
         pinned=True,
+        color="red",
         label="Efix",
     )
     return world
@@ -115,12 +111,13 @@ class MagnetarApp:
         self.world.bind_app(self)
         self.prompt = InteractivePrompt(self.world)
 
-        # View / camera state (mutable; in-window controls will drive these).
-        self.camera_offset: Vec3f = CAMERA_OFFSET
-        # Orientation matrix (camera-relative orbit composes onto this).
-        self.view_matrix: Mat3 = _IDENTITY_MAT3
-        self.world_scale: float = WORLD_SCALE
-        self.perspective: float = PERSPECTIVE
+        # 3D view / orbit / projection (associated object, not mixed into App).
+        self.view = ViewCamera(
+            camera_offset=CAMERA_OFFSET,
+            world_scale=WORLD_SCALE,
+            perspective=PERSPECTIVE,
+            viewport_size=(VIEW_WIDTH, VIEW_HEIGHT),
+        )
         self.particle_radius_px: int = PARTICLE_RADIUS_PX
 
         # pygame resources (filled in by start / _init_pygame)
@@ -141,6 +138,7 @@ class MagnetarApp:
         try:
             pygame.display.set_caption(WINDOW_TITLE)
             self.screen = pygame.display.set_mode((VIEW_WIDTH, VIEW_HEIGHT))
+            self.view.viewport_size = self.screen.get_size()
             self.clock = pygame.time.Clock()
             with hud_font_path() as font_file:
                 self.font = pygame.font.Font(str(font_file), DEFAULT_HUD_FONT_SIZE)
@@ -195,109 +193,47 @@ class MagnetarApp:
         if self.prompt.poll() is False:
             self.running = False
 
-    # -- orientation / projection ---------------------------------------------
+    # -- view API proxies (delegate to self.view) ------------------------------
+
+    @property
+    def view_matrix(self):
+        return self.view.view_matrix
+
+    @view_matrix.setter
+    def view_matrix(self, value) -> None:
+        self.view.view_matrix = value
 
     @property
     def world_rotation(self) -> Vec3f:
-        """Euler (yaw, pitch, roll) extracted from :attr:`view_matrix` for HUD/API."""
-        return self._matrix_to_yaw_pitch_roll(self.view_matrix)
+        return self.view.world_rotation
 
     @world_rotation.setter
     def world_rotation(self, ypr: Sequence[float]) -> None:
-        """Set orientation from Euler angles (rebuilds :attr:`view_matrix`)."""
-        yaw, pitch, roll = float(ypr[0]), float(ypr[1]), float(ypr[2])
-        self.view_matrix = self._euler_to_matrix(
-            self._wrap_yaw(yaw), self._clamp_pitch(pitch), roll
-        )
+        self.view.world_rotation = ypr
 
-    @staticmethod
-    def _mat_mul(a: Mat3, b: Mat3) -> Mat3:
-        """Return ``a @ b`` for row-major 3×3 matrices."""
-        rows: list[Vec3f] = []
-        for i in range(3):
-            rows.append(
-                (
-                    a[i][0] * b[0][0] + a[i][1] * b[1][0] + a[i][2] * b[2][0],
-                    a[i][0] * b[0][1] + a[i][1] * b[1][1] + a[i][2] * b[2][1],
-                    a[i][0] * b[0][2] + a[i][1] * b[1][2] + a[i][2] * b[2][2],
-                )
-            )
-        return (rows[0], rows[1], rows[2])
+    @property
+    def camera_offset(self) -> Vec3f:
+        return self.view.camera_offset
 
-    @staticmethod
-    def _mat_vec(m: Mat3, x: float, y: float, z: float) -> Vec3f:
-        return (
-            m[0][0] * x + m[0][1] * y + m[0][2] * z,
-            m[1][0] * x + m[1][1] * y + m[1][2] * z,
-            m[2][0] * x + m[2][1] * y + m[2][2] * z,
-        )
+    @camera_offset.setter
+    def camera_offset(self, value: Vec3f) -> None:
+        self.view.camera_offset = value
 
-    @staticmethod
-    def _rot_x(angle: float) -> Mat3:
-        c, s = math.cos(angle), math.sin(angle)
-        return ((1.0, 0.0, 0.0), (0.0, c, -s), (0.0, s, c))
+    @property
+    def world_scale(self) -> float:
+        return self.view.world_scale
 
-    @staticmethod
-    def _rot_y(angle: float) -> Mat3:
-        c, s = math.cos(angle), math.sin(angle)
-        return ((c, 0.0, s), (0.0, 1.0, 0.0), (-s, 0.0, c))
+    @world_scale.setter
+    def world_scale(self, value: float) -> None:
+        self.view.world_scale = float(value)
 
-    @staticmethod
-    def _rot_z(angle: float) -> Mat3:
-        c, s = math.cos(angle), math.sin(angle)
-        return ((c, -s, 0.0), (s, c, 0.0), (0.0, 0.0, 1.0))
+    @property
+    def perspective(self) -> float:
+        return self.view.perspective
 
-    @classmethod
-    def _euler_to_matrix(cls, yaw: float, pitch: float, roll: float) -> Mat3:
-        """Fixed-axis Euler rebuild: R = Rz(yaw) @ Ry(pitch) @ Rx(roll)."""
-        return cls._mat_mul(cls._rot_z(yaw), cls._mat_mul(cls._rot_y(pitch), cls._rot_x(roll)))
-
-    @staticmethod
-    def _matrix_to_yaw_pitch_roll(m: Mat3) -> Vec3f:
-        """Extract (yaw, pitch, roll) for display; yaw wrapped to [0, 2π)."""
-        sy = max(-1.0, min(1.0, -m[2][0]))
-        pitch = math.asin(sy)
-        if abs(sy) < 0.999999:
-            yaw = math.atan2(m[1][0], m[0][0])
-            roll = math.atan2(m[2][1], m[2][2])
-        else:
-            yaw = math.atan2(-m[0][1], m[1][1])
-            roll = 0.0
-        yaw = yaw % (2.0 * math.pi)
-        return (yaw, pitch, roll)
-
-    def _orbit_camera(self, d_yaw: float, d_pitch: float) -> None:
-        """Compose a camera-relative orbit onto the current view matrix.
-
-        ``d_yaw`` / ``d_pitch`` rotate about the *current* view up / right axes:
-        ``R := Rx(d_pitch) @ Ry(d_yaw) @ R``. Each gesture starts from the live
-        orientation (not fixed world axes). Camera keeps looking at the origin.
-
-        Pitch is soft-limited to ±90° by rejecting the pitch part of a step that
-        would push the extracted elevation outside that range; yaw is free
-        (HUD shows it wrapped to 0–360°).
-        """
-        if d_yaw == 0.0 and d_pitch == 0.0:
-            return
-        # Apply yaw about current view-up first (left-multiply in view space).
-        if d_yaw != 0.0:
-            self.view_matrix = self._mat_mul(self._rot_y(d_yaw), self.view_matrix)
-        if d_pitch != 0.0:
-            trial = self._mat_mul(self._rot_x(d_pitch), self.view_matrix)
-            _, pitch, _ = self._matrix_to_yaw_pitch_roll(trial)
-            if abs(pitch) <= math.pi / 2 + 1e-9:
-                self.view_matrix = trial
-            else:
-                # Nudge to the stop rather than overshooting past the pole.
-                _, cur_pitch, _ = self._matrix_to_yaw_pitch_roll(self.view_matrix)
-                target = math.copysign(math.pi / 2, d_pitch)
-                fix = target - cur_pitch
-                if abs(fix) > 1e-9 and (fix * d_pitch) > 0:
-                    self.view_matrix = self._mat_mul(self._rot_x(fix), self.view_matrix)
-
-    def _rotate_point(self, x: float, y: float, z: float) -> Vec3f:
-        """Apply the current view matrix to a world-space point."""
-        return self._mat_vec(self.view_matrix, x, y, z)
+    @perspective.setter
+    def perspective(self, value: float) -> None:
+        self.view.perspective = float(value)
 
     def project(
         self,
@@ -306,30 +242,16 @@ class MagnetarApp:
         width: int | None = None,
         height: int | None = None,
     ) -> Tuple[Vec2, float]:
-        """Project a 3D world point (meters) to screen coordinates ``(u, v)``.
-
-        Pipeline: camera offset → view matrix → perspective → pixel space.
-        Returns ``((u, v), depth)`` with view-space z as depth (larger = farther).
-        """
+        """Project via :attr:`view` (viewport defaults to the live screen size)."""
         if width is None or height is None:
             if self.screen is not None:
-                width = width if width is not None else self.screen.get_width()
-                height = height if height is not None else self.screen.get_height()
+                sw, sh = self.screen.get_size()
+                width = width if width is not None else sw
+                height = height if height is not None else sh
             else:
                 width = width if width is not None else VIEW_WIDTH
                 height = height if height is not None else VIEW_HEIGHT
-
-        ox, oy, oz = self.camera_offset
-        x = float(point[0]) - ox
-        y = float(point[1]) - oy
-        z = float(point[2]) - oz
-
-        x, y, z = self._rotate_point(x, y, z)
-
-        factor = 1.0 / max(0.2, 1.0 + z * self.perspective)
-        u = width * 0.5 + x * self.world_scale * factor
-        v = height * 0.5 - y * self.world_scale * factor  # world +y → screen up
-        return (u, v), z
+        return self.view.project(point, width=width, height=height)
 
     # -- drawing --------------------------------------------------------------
 
@@ -363,36 +285,6 @@ class MagnetarApp:
             (int(u) - text.get_width() // 2, int(v) - text.get_height() // 2 + down),
         )
 
-    def draw_particle(self, particle: Particle, *, u: float, v: float) -> None:
-        """Draw ``particle`` at projected screen coordinates ``(u, v)``."""
-        assert self.screen is not None
-        surface = self.screen
-        u_i, v_i = int(u), int(v)
-        r = PARTICLE_RADIUS_PX
-
-        if particle.color is not None:
-            color = particle.color
-        elif particle.pinned:
-            color = BOUND_COLOR
-        elif isinstance(particle, ElectroParticle):
-            color = ELECTRO_COLOR
-        else:
-            color = NEUTRAL_COLOR
-
-        if isinstance(particle, ElectroParticle):
-            width = 0 if particle.pinned else 2  # filled = fixed source
-            pygame.draw.circle(surface, color, (u_i, v_i), r, width=width)
-            mark = color if width else BACKGROUND_COLOR
-            pygame.draw.line(surface, mark, (u_i - r // 2, v_i), (u_i + r // 2, v_i), 2)
-            if particle.charge >= 0:
-                pygame.draw.line(surface, mark, (u_i, v_i - r // 2), (u_i, v_i + r // 2), 2)
-            if particle.pinned:
-                pygame.draw.circle(surface, color, (u_i, v_i), r + 3, width=1)
-        else:
-            pygame.draw.circle(
-                surface, color, (u_i, v_i), r // 2, width=0 if particle.pinned else 1
-            )
-
     def draw_hud(self) -> None:
         assert self.screen is not None and self.font is not None
         yaw, pitch, roll = self.world_rotation
@@ -416,13 +308,16 @@ class MagnetarApp:
         self.screen.fill(BACKGROUND_COLOR)
         self.draw_axes()
 
-        projected: List[Tuple[float, Particle, float, float]] = []
-        for particle in self.world.particles:
-            (u, v), depth = self.project(particle.position)
-            projected.append((depth, particle, u, v))
-        projected.sort(key=lambda item: item[0], reverse=True)
-        for _, particle, u, v in projected:
-            self.draw_particle(particle, u=u, v=v)
+        # Painter order via LayeredUpdates: larger depth (farther) draws first.
+        group = self.world.particles
+        for sprite in group:
+            if hasattr(sprite, "view_depth"):
+                depth = sprite.view_depth()
+            else:
+                _uv, depth = self.project(getattr(sprite, "position", (0, 0, 0)))
+            group.change_layer(sprite, int(-float(depth) * 1000.0))
+        # Group.draw blits each sprite.image at sprite.rect (ScreenSprite properties).
+        group.draw(self.screen)
 
         self.draw_hud()
         self.widgets.draw(self.screen)
@@ -452,34 +347,23 @@ class MagnetarApp:
         Center (Manhattan ≤ 10% of half-size) resets to identity.
         """
         if zone == "center":
-            self.view_matrix = _IDENTITY_MAT3
+            self.view.reset()
             return
         step = math.radians(ROTATE_CLICK_DEGREES)
         if zone == "left":
-            self._orbit_camera(-step, 0.0)
+            self.view.orbit_camera(-step, 0.0)
         elif zone == "right":
-            self._orbit_camera(step, 0.0)
+            self.view.orbit_camera(step, 0.0)
         elif zone == "up":
-            self._orbit_camera(0.0, step)
+            self.view.orbit_camera(0.0, step)
         elif zone == "down":
-            self._orbit_camera(0.0, -step)
+            self.view.orbit_camera(0.0, -step)
 
     def _on_orbit_drag(self, dx: int, dy: int, total_dx: int, total_dy: int) -> None:
         """Continuous camera-relative orbit (drag may leave the widget)."""
         _ = (total_dx, total_dy)
         sens = math.radians(ROTATE_DRAG_DEGREES_PER_PIXEL)
-        # Horizontal → yaw about current up; vertical → pitch about current right.
-        self._orbit_camera(dx * sens, -dy * sens)
-
-    @staticmethod
-    def _wrap_yaw(yaw: float) -> float:
-        """Keep yaw in [0, 2π) with wrap-around."""
-        return yaw % (2.0 * math.pi)
-
-    @staticmethod
-    def _clamp_pitch(pitch: float, limit: float = math.pi / 2) -> float:
-        """Keep pitch in [-90°, +90°] inclusive."""
-        return max(-limit, min(limit, pitch))
+        self.view.orbit_camera(dx * sens, -dy * sens)
 
     # -- pygame init / teardown -----------------------------------------------
 

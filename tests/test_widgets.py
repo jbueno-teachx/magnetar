@@ -102,7 +102,8 @@ def test_registry_drag_capture_outside_widget() -> None:
 
 
 def test_orbit_click_rotates_app_view() -> None:
-    from magnetar.app import MagnetarApp, ROTATE_CLICK_DEGREES, _IDENTITY_MAT3
+    from magnetar.app import MagnetarApp, ROTATE_CLICK_DEGREES
+    from magnetar.view3d import IDENTITY_MAT3
     from magnetar.units import meters
 
     app = MagnetarApp()
@@ -112,7 +113,7 @@ def test_orbit_click_rotates_app_view() -> None:
         assert app._orbit_button is not None
         app._on_orbit_click("right")
         # Camera-relative step: matrix leaves identity
-        assert app.view_matrix != _IDENTITY_MAT3
+        assert app.view_matrix != IDENTITY_MAT3
         # Looking at origin: camera offset unchanged
         assert app.camera_offset == (0.0, 0.0, 0.0)
 
@@ -132,7 +133,7 @@ def test_orbit_click_rotates_app_view() -> None:
         assert cross > 1.0
 
         app._on_orbit_click("center")
-        assert app.view_matrix == _IDENTITY_MAT3
+        assert app.view_matrix == IDENTITY_MAT3
     finally:
         pygame.display.quit()
 

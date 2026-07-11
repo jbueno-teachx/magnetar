@@ -115,7 +115,7 @@ def test_app_contextvar_and_particle_rect() -> None:
     # Demo world has particles already bound through the app.
     p = next(iter(app.world.particles))
     assert isinstance(p, Particle)
-    r = p.rect()
+    r = p.rect
     assert isinstance(r, pygame.Rect)
     assert r.width == PARTICLE_RADIUS_PX * 2
     assert r.height == PARTICLE_RADIUS_PX * 2

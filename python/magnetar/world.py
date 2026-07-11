@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 class World:
     """Container for particles living in continuous 3D space (meters, seconds).
 
-    Particles are stored in a :class:`pygame.sprite.Group`. A per-instance
+    Particles are stored in a :class:`pygame.sprite.LayeredUpdates` group (supports :meth:`~pygame.sprite.LayeredUpdates.draw` + depth layers). A per-instance
     :class:`contextvars.ContextVar` holds a reference to the owning app
     (set by :class:`~magnetar.app.MagnetarApp`).
     """
@@ -36,7 +36,7 @@ class World:
             f"magnetar_app_{id(self)}",
             default=None,
         )
-        self.particles: pygame.sprite.Group = pygame.sprite.Group()
+        self.particles: pygame.sprite.LayeredUpdates = pygame.sprite.LayeredUpdates()
         self.time: Second = second(0.0)
 
     # -- app binding (ContextVar instance attribute) --------------------------
@@ -70,6 +70,7 @@ class World:
         mass: Gram | float = DEFAULT_MASS,
         pinned: bool = False,
         label: str = "",
+        color: str = "yellow",
     ) -> Particle:
         return self.add(
             Particle(
@@ -78,6 +79,7 @@ class World:
                 mass=gram(mass),
                 pinned=pinned,
                 label=label or f"P{len(self.particles)}",
+                color=color,
             )
         )
 
@@ -90,6 +92,7 @@ class World:
         velocity: Velocity3 = (0.0, 0.0, 0.0),
         pinned: bool = False,
         label: str = "",
+        color: str = "yellow",
     ) -> ElectroParticle:
         particle = ElectroParticle(
             as_position(position),
@@ -98,22 +101,23 @@ class World:
             pinned=pinned,
             charge=coulomb(charge),
             label=label or f"E{len(self.particles)}",
+            color=color,
         )
         self.add(particle)
         return particle
 
     def remove(self, particle: Particle) -> None:
         """Detach and :meth:`~pygame.sprite.Sprite.kill` a particle."""
-        particle.detach_world()
         particle.kill()
+        particle.detach_world()
 
     def clear(self) -> None:
         """Remove every particle via :meth:`kill` and detach world refs."""
         for particle in list(self.particles):
+            # kill() first (group may touch .rect); then drop the world weakref.
+            particle.kill()
             if isinstance(particle, Particle):
                 particle.detach_world()
-            particle.kill()
-        # Belt-and-suspenders: ensure the group is empty.
         self.particles.empty()
 
     def step(self, dt: Second | float) -> None:

@@ -62,7 +62,7 @@ HEIGHT = 256
 # name → POV pigment expression (rgb or rgbf)
 PARTICLE_PRESETS: dict[str, str] = {
     "yellow": "rgb <1.0, 0.9, 0.15>",
-    "light_blue": "rgb <0.45, 0.8, 1.0>",
+    "light_blue": "rgb <0, 0.5, 1.0>",
     "red": "rgb <1.0, 0.2, 0.15>",
     "green": "rgb <0.2, 0.85, 0.3>",
 }
@@ -105,6 +105,7 @@ def render_one(
     sphere_color: str,
     template: str,
     quality_extra: list[str],
+    display: bool = False,
 ) -> Path:
     """Fill template → tmp_pov, render → tmp_render, then delete the filled .pov."""
     filled = fill_template(template, sphere_color=sphere_color)
@@ -112,7 +113,7 @@ def render_one(
     png_path = TMP_RENDER_DIR / f"particle_{name}.png"
     pov_path.write_text(filled, encoding="utf-8")
 
-    # +FN PNG, +UA output alpha, -D no display, +A antialias
+    # +FN PNG, +UA output alpha, +D/-D display window, +A antialias
     cmd = [
         povray,
         f"+I{pov_path}",
@@ -121,7 +122,7 @@ def render_one(
         f"+H{HEIGHT}",
         "+FN",
         "+UA",
-        "-D",
+        "+D" if display else "-D",
         "+A0.3",
         *quality_extra,
     ]
@@ -174,6 +175,11 @@ def main(argv: list[str] | None = None) -> int:
         choices=sorted(PARTICLE_PRESETS),
         help="Render only these named presets (default: all)",
     )
+    parser.add_argument(
+        "--display",
+        action="store_true",
+        help="Show POV-Ray's render window (+D); default is off (-D)",
+    )
     args = parser.parse_args(argv)
 
     if not TEMPLATE_PATH.is_file():
@@ -196,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
                 sphere_color=color,
                 template=template,
                 quality_extra=[],
+                display=args.display,
             )
         )
 
