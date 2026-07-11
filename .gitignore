@@ -29,3 +29,9 @@ htmlcov/
 *.swp
 *~
 .DS_Store
+
+# POV-Ray intermediate work (keep directory via .gitkeep)
+image_scripts/tmp_pov/*
+!image_scripts/tmp_pov/.gitkeep
+image_scripts/tmp_render/*
+!image_scripts/tmp_render/.gitkeep
