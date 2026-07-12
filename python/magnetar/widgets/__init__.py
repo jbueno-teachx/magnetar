@@ -28,6 +28,7 @@ from magnetar.widgets.base import (
     WidgetPointerEvent,
 )
 from magnetar.widgets.buttons import Button, DragImageButton, make_curved_arrows_icon
+from magnetar.widgets.history_textentry import HistoryTextEntry
 from magnetar.widgets.keyevent import KeyEvent
 from magnetar.widgets.registry import WidgetRegistry
 from magnetar.widgets.textentry import TextEntry
@@ -41,6 +42,7 @@ __all__ = [
     "Command",
     "DragImageButton",
     "EventInterest",
+    "HistoryTextEntry",
     "KeyEvent",
     "Point",
     "ScreenSize",
@@ -76,7 +78,16 @@ def init() -> None:
 
 
 def quit() -> None:
-    """Stop widget subsystem services (clipboard Tk mainloop thread)."""
+    """Stop widget subsystem services (history flush + clipboard Tk thread)."""
+    try:
+        from magnetar.widgets.history import save_all_histories
+
+        save_all_histories()
+    except Exception as exc:  # noqa: BLE001
+        warnings.warn(
+            f"magnetar.widgets.quit: history save failed ({exc})",
+            stacklevel=2,
+        )
     try:
         from magnetar.widgets import clipboard as _clip
 

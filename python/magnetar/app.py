@@ -25,7 +25,7 @@ from magnetar import widgets as widgets_pkg
 from magnetar.widgets import (
     Anchor,
     DragImageButton,
-    TextEntry,
+    HistoryTextEntry,
     WIDGET_SUBMIT,
     WidgetRegistry,
     make_curved_arrows_icon,
@@ -153,7 +153,7 @@ class MagnetarApp:
         # In-window UI (registry filled after pygame init when surfaces exist).
         self.widgets = WidgetRegistry()
         self._orbit_button: DragImageButton | None = None
-        self._prompt_entry: TextEntry | None = None
+        self._prompt_entry: HistoryTextEntry | None = None
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -393,14 +393,14 @@ class MagnetarApp:
         )
         self.widgets.add(self._orbit_button)
 
-        self._prompt_entry = TextEntry(
+        self._prompt_entry = HistoryTextEntry(
             PROMPT_WIDGET_X_PCT,
             PROMPT_WIDGET_Y_PCT,
             PROMPT_WIDGET_W_PCT,
             PROMPT_WIDGET_H_PCT,
+            name="prompt",
             anchor=PROMPT_WIDGET_ANCHOR,
             font=self.font,
-            name="prompt",
             placeholder="magnetar> ",
             border=THEME_COLOR,
             border_focused=(0, 255, 200),

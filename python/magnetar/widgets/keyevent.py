@@ -198,3 +198,7 @@ KeyEvent(
 )
 KeyEvent("SUBMIT", pygame.K_RETURN, pygame.K_KP_ENTER)
 KeyEvent("BLUR", pygame.K_ESCAPE)
+# HistoryTextEntry navigation / reverse search
+KeyEvent("HISTORY_UP", pygame.K_UP)
+KeyEvent("HISTORY_DOWN", pygame.K_DOWN)
+KeyEvent("HISTORY_SEARCH", (KeyEvent.CTRL, "R"))
