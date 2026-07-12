@@ -36,3 +36,6 @@ image_scripts/tmp_pov/*
 !image_scripts/tmp_pov/.gitkeep
 image_scripts/tmp_render/*
 !image_scripts/tmp_render/.gitkeep
+
+# Local scratch / clipboard MRE (not for history)
+temp/
