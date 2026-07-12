@@ -21,6 +21,7 @@ from magnetar.assets import DEFAULT_HUD_FONT_SIZE, hud_font_path
 from magnetar.prompt import InteractivePrompt
 from magnetar.units import coulomb, gram, meters, second
 from magnetar.view3d import ViewCamera
+from magnetar import widgets as widgets_pkg
 from magnetar.widgets import (
     Anchor,
     DragImageButton,
@@ -157,21 +158,31 @@ class MagnetarApp:
     # -- lifecycle ------------------------------------------------------------
 
     def start(self) -> int:
-        """Initialize pygame, run the loop, always shut down cleanly."""
-        self._init_pygame()
+        """Initialize, run the loop, always shut down cleanly."""
+        self._init()
         try:
-            pygame.display.set_caption(WINDOW_TITLE)
-            self.screen = pygame.display.set_mode((VIEW_WIDTH, VIEW_HEIGHT))
-            self.view.viewport_size = self.screen.get_size()
-            self.clock = pygame.time.Clock()
-            with hud_font_path() as font_file:
-                self.font = pygame.font.Font(str(font_file), DEFAULT_HUD_FONT_SIZE)
-            self._build_ui()
-            self.prompt.start()
             return self.run()
         finally:
-            self.prompt.stop()
-            self._shutdown_pygame()
+            self._quit()
+
+    def _init(self) -> None:
+        """Bring up pygame, widgets (clipboard), display, UI, and stdin prompt."""
+        self._init_pygame()
+        widgets_pkg.init()
+        pygame.display.set_caption(WINDOW_TITLE)
+        self.screen = pygame.display.set_mode((VIEW_WIDTH, VIEW_HEIGHT))
+        self.view.viewport_size = self.screen.get_size()
+        self.clock = pygame.time.Clock()
+        with hud_font_path() as font_file:
+            self.font = pygame.font.Font(str(font_file), DEFAULT_HUD_FONT_SIZE)
+        self._build_ui()
+        self.prompt.start()
+
+    def _quit(self) -> None:
+        """Tear down prompt, widgets (clipboard), and pygame."""
+        self.prompt.stop()
+        widgets_pkg.quit()
+        self._shutdown_pygame()
 
     def run(self) -> int:
         """Main loop only: tick → events → step → draw → flip."""

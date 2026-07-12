@@ -12,8 +12,7 @@ from unittest.mock import patch
 import pygame
 import pytest
 
-from magnetar import clipboard
-from magnetar.widgets import KeyEvent, TextEntry
+from magnetar.widgets import KeyEvent, TextEntry, clipboard
 
 
 def _keydown(key: int, uni: str = "", *, mod: int = 0) -> pygame.event.Event:
@@ -48,8 +47,8 @@ def test_text_entry_copy_paste_via_mock_clipboard() -> None:
             return store.get("t", "")
 
         with (
-            patch("magnetar.widgets.set_text", side_effect=fake_set),
-            patch("magnetar.widgets.get_text", side_effect=fake_get),
+            patch("magnetar.widgets.textentry.set_text", side_effect=fake_set),
+            patch("magnetar.widgets.textentry.get_text", side_effect=fake_get),
         ):
             assert entry.handle_key(_keydown(pygame.K_c, mod=pygame.KMOD_CTRL), size)
             assert store["t"] == "hello"
@@ -80,7 +79,7 @@ def test_text_entry_paste_flattens_newlines() -> None:
         entry = TextEntry(0, 0, 100, 30, font=pygame.font.Font(None, 24), text="")
         entry.focus()
         size = (800, 60)
-        with patch("magnetar.widgets.get_text", return_value="a\nb\r\nc"):
+        with patch("magnetar.widgets.textentry.get_text", return_value="a\nb\r\nc"):
             entry.handle_key(_keydown(pygame.K_v, mod=pygame.KMOD_CTRL), size)
         assert entry.text == "a b c"
     finally:
@@ -89,17 +88,30 @@ def test_text_entry_paste_flattens_newlines() -> None:
 
 @pytest.mark.clipboard
 def test_system_clipboard_roundtrip() -> None:
-    """Real OS clipboard — skip when no backend is usable."""
-    clipboard.reset()
+    """Real OS clipboard — skip when Tk worker cannot start."""
+    clipboard.shutdown()
     if not clipboard.available():
-        pytest.skip("clipboard unavailable (no wl-copy/xclip/Tk)")
+        pytest.skip("clipboard unavailable (tkinter / no display)")
     try:
         marker = "magnetar-clip-test-unique"
         clipboard.set_text(marker)
         got = clipboard.get_text()
         assert got == marker, f"backend={clipboard.backend_name()!r} got={got!r}"
+        assert clipboard.backend_name() == "tkinter-mainloop-thread"
     finally:
-        clipboard.reset()
+        clipboard.shutdown()
+
+
+def test_clipboard_shutdown_poison_stops_worker() -> None:
+    clipboard.shutdown()
+    if not clipboard.available():
+        pytest.skip("clipboard unavailable")
+    clipboard.set_text("before-shutdown")
+    clipboard.shutdown()
+    # Restart after poison must work.
+    clipboard.set_text("after-restart")
+    assert clipboard.get_text() == "after-restart"
+    clipboard.shutdown()
 
 
 def test_text_entry_copy_warns_on_clipboard_error() -> None:
@@ -111,7 +123,7 @@ def test_text_entry_copy_warns_on_clipboard_error() -> None:
         size = (400, 40)
         with (
             patch(
-                "magnetar.widgets.set_text",
+                "magnetar.widgets.textentry.set_text",
                 side_effect=clipboard.ClipboardError("boom"),
             ),
             pytest.warns(UserWarning, match="COPY failed"),
