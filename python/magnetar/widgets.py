@@ -16,6 +16,8 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
 
+from magnetar.clipboard import ClipboardError, get_text, set_text
+
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
@@ -150,6 +152,7 @@ class KeyEvent:
     CONTROL = CTRL  # alias
     ALT = _ModSentinel("alt", pygame.KMOD_ALT)
     META = _ModSentinel("meta", pygame.KMOD_META, pygame.KMOD_GUI)
+    SHIFT = _ModSentinel("shift", pygame.KMOD_SHIFT)
 
     # name.casefold() -> instance
     mapping: dict[str, "KeyEvent"] = {}
@@ -231,6 +234,7 @@ class KeyEvent:
         need_ctrl = any(s is KeyEvent.CTRL or s is KeyEvent.CONTROL for s in required)
         need_alt = any(s is KeyEvent.ALT for s in required)
         need_meta = any(s is KeyEvent.META for s in required)
+        need_shift = any(s is KeyEvent.SHIFT for s in required)
         if required:
             if (mods & pygame.KMOD_CTRL) and not need_ctrl:
                 return False
@@ -238,6 +242,10 @@ class KeyEvent:
             if (mods & pygame.KMOD_ALT) and not need_alt and not need_meta:
                 return False
             if (mods & (pygame.KMOD_META | pygame.KMOD_GUI)) and not need_meta and not need_alt:
+                return False
+            # Shift is optional unless the combo lists SHIFT (Ctrl+C still matches
+            # Ctrl+Shift+C when only CTRL is required).
+            if need_shift and not (mods & pygame.KMOD_SHIFT):
                 return False
         return True
 
@@ -270,6 +278,19 @@ KeyEvent(
 KeyEvent("KILL_WORD_FORWARD", (KeyEvent.ALT, "D"), (KeyEvent.META, "D"))
 KeyEvent("YANK", (KeyEvent.CTRL, "Y"))
 KeyEvent("TRANSPOSE", (KeyEvent.CTRL, "T"))
+# System clipboard (full field until selection exists): Ctrl/Cmd+C, Ctrl+Shift+C.
+KeyEvent(
+    "COPY",
+    (KeyEvent.CTRL, "C"),
+    (KeyEvent.CTRL, KeyEvent.SHIFT, "C"),
+    (KeyEvent.META, "C"),
+)
+KeyEvent(
+    "PASTE",
+    (KeyEvent.CTRL, "V"),
+    (KeyEvent.META, "V"),
+    (KeyEvent.SHIFT, pygame.K_INSERT),
+)
 KeyEvent("SUBMIT", pygame.K_RETURN, pygame.K_KP_ENTER)
 KeyEvent("BLUR", pygame.K_ESCAPE)
 
@@ -622,7 +643,12 @@ class TextEntry(Widget):
         Ctrl+W            kill word backward
         Alt+D             kill word forward
         Alt+Backspace     kill word backward
-        Ctrl+Y            yank last kill
+        Ctrl+Y            yank last kill (internal kill buffer)
+
+    System clipboard (currently whole field; selection comes later)::
+
+        Ctrl+C / Ctrl+Shift+C / Cmd+C   copy all text
+        Ctrl+V / Cmd+V / Shift+Insert   paste at caret
 
     Other::
 
@@ -630,8 +656,8 @@ class TextEntry(Widget):
         Enter             submit (``WIDGET_SUBMIT``)
         Esc               blur
 
-    Not implemented (multi-line / history / full kill-ring):: Ctrl+P/N history,
-    Ctrl+_ undo, multi-entry kill ring.
+    Not implemented (multi-line / history / full kill-ring / selection)::
+    Ctrl+P/N history, Ctrl+_ undo, multi-entry kill ring, shift-move select.
     """
 
     def __init__(
@@ -950,6 +976,22 @@ class TextEntry(Widget):
             return True
         if KeyEvent["YANK"].match(event):
             self._insert_text(self._kill_buffer, screen_size)
+            return True
+        if KeyEvent["COPY"].match(event):
+            # Whole field for now; later: copy selection when present.
+            try:
+                set_text(self._text)
+            except ClipboardError:
+                pass
+            return True
+        if KeyEvent["PASTE"].match(event):
+            try:
+                clip = get_text()
+            except ClipboardError:
+                clip = ""
+            # Single-line field: drop newlines from multi-line pastes.
+            clip = clip.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
+            self._insert_text(clip, screen_size)
             return True
         if KeyEvent["TRANSPOSE"].match(event):
             # Swap char before caret with char at caret; at EOL swap last two.

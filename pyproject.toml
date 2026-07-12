@@ -57,6 +57,9 @@ magnetar = ["py.typed", "assets/**/*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["python"]
+markers = [
+    "clipboard: needs tkinter + display for real OS clipboard (may skip)",
+]
 
 [tool.ruff]
 line-length = 100
