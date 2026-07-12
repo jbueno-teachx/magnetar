@@ -104,6 +104,176 @@ class Anchor:
 AnchorLike = Union[Anchor, str, tuple[str, str], None]
 
 
+# ---------------------------------------------------------------------------
+# Named key bindings (Emacs / readline style, reusable by any widget)
+# ---------------------------------------------------------------------------
+
+
+class _ModSentinel:
+    """Modifier marker used in :class:`KeyEvent` combo tuples."""
+
+    __slots__ = ("name", "masks")
+
+    def __init__(self, name: str, *masks: int) -> None:
+        self.name = name
+        self.masks = masks
+
+    def present(self, mod: int) -> bool:
+        return any(mod & m for m in self.masks)
+
+    def __repr__(self) -> str:
+        return f"KeyEvent.{self.name.upper()}"
+
+
+class KeyEvent:
+    """Named logical key action with one or more physical combos.
+
+    Instantiation registers the binding in :attr:`mapping` (case-insensitive
+    names). Lookup: ``KeyEvent["HOME"]`` / ``KeyEvent["home"]``.
+
+    Combo forms (varargs to the constructor)::
+
+        pygame.K_HOME                 # bare key
+        "A"                           # letter key (case-insensitive)
+        (KeyEvent.CTRL, "K")          # modifier + key
+        (KeyEvent.ALT, pygame.K_BACKSPACE)
+
+    Matching::
+
+        if KeyEvent["HOME"].match(event):
+            ...
+        KeyEvent["HOME"].match(e1, e2)  # True if *any* event matches
+    """
+
+    # Modifier sentinels for combo tuples
+    CTRL = _ModSentinel("ctrl", pygame.KMOD_CTRL)
+    CONTROL = CTRL  # alias
+    ALT = _ModSentinel("alt", pygame.KMOD_ALT)
+    META = _ModSentinel("meta", pygame.KMOD_META, pygame.KMOD_GUI)
+
+    # name.casefold() -> instance
+    mapping: dict[str, "KeyEvent"] = {}
+
+    # Bits treated as "chord modifiers" when a combo specifies none.
+    _CHORD_MODS = pygame.KMOD_CTRL | pygame.KMOD_ALT | pygame.KMOD_META | pygame.KMOD_GUI
+
+    def __init__(self, name: str, *combos: Any) -> None:
+        if not name or not str(name).strip():
+            raise ValueError("KeyEvent name must be non-empty")
+        if not combos:
+            raise ValueError(f"KeyEvent {name!r} needs at least one combo")
+        self.name = str(name)
+        self.combos: list[tuple[Any, ...]] = []
+        for combo in combos:
+            if isinstance(combo, tuple):
+                if not combo:
+                    raise ValueError(f"KeyEvent {name!r}: empty combo")
+                self.combos.append(combo)
+            else:
+                # Bare key constant or letter string.
+                self.combos.append((combo,))
+        KeyEvent.mapping[self.name.casefold()] = self
+
+    def __repr__(self) -> str:
+        return f"KeyEvent({self.name!r}, …)"
+
+    @classmethod
+    def __class_getitem__(cls, name: str) -> "KeyEvent":
+        try:
+            return cls.mapping[str(name).casefold()]
+        except KeyError as exc:
+            raise KeyError(f"unknown KeyEvent {name!r}") from exc
+
+    @classmethod
+    def get(cls, name: str, default: "KeyEvent | None" = None) -> "KeyEvent | None":
+        return cls.mapping.get(str(name).casefold(), default)
+
+    @staticmethod
+    def _token_to_key(token: Any) -> int | None:
+        if isinstance(token, _ModSentinel):
+            return None
+        if isinstance(token, int):
+            return int(token)
+        if isinstance(token, str) and len(token) == 1:
+            ch = token.lower()
+            attr = f"K_{ch}"
+            if hasattr(pygame, attr):
+                return int(getattr(pygame, attr))
+            # Digits and a few symbols via K_0 … if present
+            return None
+        if isinstance(token, str) and token.startswith("K_"):
+            return int(getattr(pygame, token))
+        return None
+
+    def _match_combo(self, event: pygame.event.Event, combo: tuple[Any, ...]) -> bool:
+        if getattr(event, "type", None) != pygame.KEYDOWN:
+            return False
+        mods = int(getattr(event, "mod", 0) or 0)
+        required: list[_ModSentinel] = []
+        key_code: int | None = None
+        for part in combo:
+            if isinstance(part, _ModSentinel):
+                required.append(part)
+                continue
+            key_code = self._token_to_key(part)
+            if key_code is None:
+                return False
+        if key_code is None or int(event.key) != key_code:
+            return False
+        for sentinel in required:
+            if not sentinel.present(mods):
+                return False
+        if not required and (mods & self._CHORD_MODS):
+            # Bare keys must not be part of a Ctrl/Alt/Meta chord.
+            return False
+        # When mods are required, still ignore if an *unrelated* chord family
+        # is held without being listed (Ctrl vs Alt). Shift alone is fine.
+        need_ctrl = any(s is KeyEvent.CTRL or s is KeyEvent.CONTROL for s in required)
+        need_alt = any(s is KeyEvent.ALT for s in required)
+        need_meta = any(s is KeyEvent.META for s in required)
+        if required:
+            if (mods & pygame.KMOD_CTRL) and not need_ctrl:
+                return False
+            # Alt without ALT/META in the combo is a different chord.
+            if (mods & pygame.KMOD_ALT) and not need_alt and not need_meta:
+                return False
+            if (mods & (pygame.KMOD_META | pygame.KMOD_GUI)) and not need_meta and not need_alt:
+                return False
+        return True
+
+    def match(self, event: pygame.event.Event, *more: pygame.event.Event) -> bool:
+        """Return True if any of the given pygame events matches this binding."""
+        for ev in (event, *more):
+            for combo in self.combos:
+                if self._match_combo(ev, combo):
+                    return True
+        return False
+
+
+# Logical bindings used by :class:`TextEntry` (and available app-wide).
+KeyEvent("BACKWARD_CHAR", pygame.K_LEFT, (KeyEvent.CTRL, "B"))
+KeyEvent("FORWARD_CHAR", pygame.K_RIGHT, (KeyEvent.CTRL, "F"))
+KeyEvent("BACKWARD_WORD", (KeyEvent.ALT, "B"), (KeyEvent.META, "B"))
+KeyEvent("FORWARD_WORD", (KeyEvent.ALT, "F"), (KeyEvent.META, "F"))
+KeyEvent("HOME", pygame.K_HOME, (KeyEvent.CTRL, "A"))
+KeyEvent("END", pygame.K_END, (KeyEvent.CTRL, "E"))
+KeyEvent("BACKSPACE", pygame.K_BACKSPACE, (KeyEvent.CTRL, "H"))
+KeyEvent("DELETE_CHAR", pygame.K_DELETE, (KeyEvent.CTRL, "D"))
+KeyEvent("KILL_TO_END", (KeyEvent.CTRL, "K"))
+KeyEvent("KILL_TO_START", (KeyEvent.CTRL, "U"))
+KeyEvent(
+    "KILL_WORD_BACKWARD",
+    (KeyEvent.CTRL, "W"),
+    (KeyEvent.ALT, pygame.K_BACKSPACE),
+    (KeyEvent.META, pygame.K_BACKSPACE),
+)
+KeyEvent("KILL_WORD_FORWARD", (KeyEvent.ALT, "D"), (KeyEvent.META, "D"))
+KeyEvent("YANK", (KeyEvent.CTRL, "Y"))
+KeyEvent("TRANSPOSE", (KeyEvent.CTRL, "T"))
+KeyEvent("SUBMIT", pygame.K_RETURN, pygame.K_KP_ENTER)
+KeyEvent("BLUR", pygame.K_ESCAPE)
+
+
 class EventInterest(enum.Flag):
     """What kinds of events a widget wants from the registry."""
 
@@ -431,6 +601,37 @@ class TextEntry(Widget):
 
     Posts generic :data:`WIDGET_*` events (via :meth:`post_event`) with extra
     attributes ``text`` and ``cursor``.
+
+    Emacs / GNU Readline-style bindings (implemented)
+    -------------------------------------------------
+    Movement::
+
+        Ctrl+A / Home     beginning of line
+        Ctrl+E / End      end of line
+        Ctrl+B / ←        backward char
+        Ctrl+F / →        forward char
+        Alt+B             backward word
+        Alt+F             forward word
+
+    Deletion / kill (one-slot kill buffer for yank)::
+
+        Ctrl+D / Delete   delete char under cursor
+        Ctrl+H / Backspace  delete char before cursor
+        Ctrl+K            kill to end of line
+        Ctrl+U            kill to beginning of line
+        Ctrl+W            kill word backward
+        Alt+D             kill word forward
+        Alt+Backspace     kill word backward
+        Ctrl+Y            yank last kill
+
+    Other::
+
+        Ctrl+T            transpose characters around cursor
+        Enter             submit (``WIDGET_SUBMIT``)
+        Esc               blur
+
+    Not implemented (multi-line / history / full kill-ring):: Ctrl+P/N history,
+    Ctrl+_ undo, multi-entry kill ring.
     """
 
     def __init__(
@@ -479,6 +680,7 @@ class TextEntry(Widget):
         self.focused = False
         self.cursor = len(self._text)
         self._caret_force_on_until: int = 0
+        self._kill_buffer: str = ""
 
     # -- text / caret ---------------------------------------------------------
 
@@ -613,6 +815,69 @@ class TextEntry(Widget):
                 break
         return best
 
+    # -- line-edit helpers (Emacs / readline) ---------------------------------
+
+    @staticmethod
+    def _is_word_char(ch: str) -> bool:
+        return ch.isalnum() or ch == "_"
+
+    def _word_left(self, pos: int) -> int:
+        """Index of the start of the word at/before ``pos`` (readline M-b)."""
+        i = max(0, min(pos, len(self._text)))
+        # Skip separators left of the caret.
+        while i > 0 and not self._is_word_char(self._text[i - 1]):
+            i -= 1
+        while i > 0 and self._is_word_char(self._text[i - 1]):
+            i -= 1
+        return i
+
+    def _word_right(self, pos: int) -> int:
+        """Index past the end of the word at/after ``pos`` (readline M-f)."""
+        n = len(self._text)
+        i = max(0, min(pos, n))
+        while i < n and not self._is_word_char(self._text[i]):
+            i += 1
+        while i < n and self._is_word_char(self._text[i]):
+            i += 1
+        return i
+
+    def _delete_range(self, start: int, end: int, *, kill: bool) -> None:
+        """Remove ``text[start:end]``; if ``kill``, store it for Ctrl+Y."""
+        start = max(0, min(start, len(self._text)))
+        end = max(start, min(end, len(self._text)))
+        if start == end:
+            return
+        chunk = self._text[start:end]
+        if kill:
+            self._kill_buffer = chunk
+        self._text = self._text[:start] + self._text[end:]
+        self.cursor = start
+        self._nudge_caret()
+        self.post_event(WIDGET_CHANGED, text=self._text, cursor=self.cursor)
+
+    def _insert_text(self, s: str, screen_size: ScreenSize) -> bool:
+        """Insert ``s`` at the caret if it fits. Return True if anything inserted."""
+        if not s:
+            return False
+        candidate = self._text[: self.cursor] + s + self._text[self.cursor :]
+        if not self._fits(candidate, screen_size):
+            # Insert as many prefix chars as fit (yank may be long).
+            kept = ""
+            for ch in s:
+                trial = self._text[: self.cursor] + kept + ch + self._text[self.cursor :]
+                if not self._fits(trial, screen_size):
+                    break
+                kept += ch
+            if not kept:
+                return False
+            s = kept
+            candidate = self._text[: self.cursor] + s + self._text[self.cursor :]
+        self._text = candidate
+        self.cursor += len(s)
+        self._nudge_caret()
+        self.post_event(WIDGET_CHANGED, text=self._text, cursor=self.cursor)
+        return True
+
     def handle_key(self, event: pygame.event.Event, screen_size: ScreenSize) -> bool:
         """Handle a ``KEYDOWN`` while focused. Return True if consumed.
 
@@ -620,71 +885,116 @@ class TextEntry(Widget):
         :func:`pygame.key.set_repeat` is enabled (see :class:`~magnetar.app.MagnetarApp`),
         the OS/SDL posts additional ``KEYDOWN`` events for a held key, and each is
         handled here the same as a fresh press.
+
+        Bindings are named :class:`KeyEvent` entries (e.g. ``KeyEvent["HOME"]``).
+        See the class docstring for the Emacs/readline map.
         """
         if not self.focused or not self.enabled or not self.visible:
             return False
         if event.type != pygame.KEYDOWN:
             return False
 
-        key = event.key
-        mods = getattr(event, "mod", 0)
-        ctrl = bool(mods & pygame.KMOD_CTRL)
+        mods = int(getattr(event, "mod", 0) or 0)
+        chord = bool(mods & KeyEvent._CHORD_MODS)
 
-        if key == pygame.K_LEFT:
+        # --- movement --------------------------------------------------------
+        if KeyEvent["BACKWARD_CHAR"].match(event):
             if self.cursor > 0:
                 self.cursor -= 1
                 self._nudge_caret()
             return True
-        if key == pygame.K_RIGHT:
+        if KeyEvent["FORWARD_CHAR"].match(event):
             if self.cursor < len(self._text):
                 self.cursor += 1
                 self._nudge_caret()
             return True
-        # Home / End — also Emacs-style Ctrl+A / Ctrl+E.
-        if key == pygame.K_HOME or (ctrl and key == pygame.K_a):
+        if KeyEvent["BACKWARD_WORD"].match(event):
+            self.cursor = self._word_left(self.cursor)
+            self._nudge_caret()
+            return True
+        if KeyEvent["FORWARD_WORD"].match(event):
+            self.cursor = self._word_right(self.cursor)
+            self._nudge_caret()
+            return True
+        if KeyEvent["HOME"].match(event):
             self.cursor = 0
             self._nudge_caret()
             return True
-        if key == pygame.K_END or (ctrl and key == pygame.K_e):
+        if KeyEvent["END"].match(event):
             self.cursor = len(self._text)
             self._nudge_caret()
             return True
-        if key == pygame.K_BACKSPACE:
+
+        # --- deletion / kill / yank ------------------------------------------
+        if KeyEvent["KILL_WORD_BACKWARD"].match(event):
+            start = self._word_left(self.cursor)
+            self._delete_range(start, self.cursor, kill=True)
+            return True
+        if KeyEvent["BACKSPACE"].match(event):
             if self.cursor > 0:
-                self._text = self._text[: self.cursor - 1] + self._text[self.cursor :]
-                self.cursor -= 1
-                self._nudge_caret()
-                self.post_event(WIDGET_CHANGED, text=self._text, cursor=self.cursor)
+                self._delete_range(self.cursor - 1, self.cursor, kill=False)
             return True
-        if key == pygame.K_DELETE:
+        if KeyEvent["DELETE_CHAR"].match(event):
             if self.cursor < len(self._text):
-                self._text = self._text[: self.cursor] + self._text[self.cursor + 1 :]
-                self._nudge_caret()
-                self.post_event(WIDGET_CHANGED, text=self._text, cursor=self.cursor)
+                self._delete_range(self.cursor, self.cursor + 1, kill=False)
             return True
-        if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+        if KeyEvent["KILL_TO_END"].match(event):
+            self._delete_range(self.cursor, len(self._text), kill=True)
+            return True
+        if KeyEvent["KILL_TO_START"].match(event):
+            self._delete_range(0, self.cursor, kill=True)
+            return True
+        if KeyEvent["KILL_WORD_FORWARD"].match(event):
+            end = self._word_right(self.cursor)
+            self._delete_range(self.cursor, end, kill=True)
+            return True
+        if KeyEvent["YANK"].match(event):
+            self._insert_text(self._kill_buffer, screen_size)
+            return True
+        if KeyEvent["TRANSPOSE"].match(event):
+            # Swap char before caret with char at caret; at EOL swap last two.
+            n = len(self._text)
+            if n >= 2:
+                if self.cursor == 0:
+                    pass
+                elif self.cursor == n:
+                    a, b = self._text[n - 2], self._text[n - 1]
+                    self._text = self._text[: n - 2] + b + a
+                    self.cursor = n
+                    self._nudge_caret()
+                    self.post_event(WIDGET_CHANGED, text=self._text, cursor=self.cursor)
+                else:
+                    a, b = self._text[self.cursor - 1], self._text[self.cursor]
+                    self._text = (
+                        self._text[: self.cursor - 1] + b + a + self._text[self.cursor + 1 :]
+                    )
+                    self.cursor += 1
+                    self._nudge_caret()
+                    self.post_event(WIDGET_CHANGED, text=self._text, cursor=self.cursor)
+            return True
+
+        if KeyEvent["SUBMIT"].match(event):
             self.post_event(WIDGET_SUBMIT, text=self._text, cursor=self.cursor)
             self.invoke_command(self._text)
             return True
-        if key == pygame.K_ESCAPE:
-            # Blur first; app may still quit on Esc if it does not treat this as consumed.
+        if KeyEvent["BLUR"].match(event):
             self.blur()
             return True
 
+        # Printable insert — ignore when a modifier chord is held.
+        if chord:
+            return False
+
         ch = getattr(event, "unicode", "") or ""
         if ch and ch.isprintable() and ch not in "\r\n\t":
-            candidate = self._text[: self.cursor] + ch + self._text[self.cursor :]
-            if self._fits(candidate, screen_size):
-                self._text = candidate
-                self.cursor += len(ch)
-                self._nudge_caret()
-                self.post_event(WIDGET_CHANGED, text=self._text, cursor=self.cursor)
+            self._insert_text(ch, screen_size)
             return True
 
         # Consume un-modified keys while focused so global bindings (e.g. bare ``q``)
-        # do not fire; leave other Ctrl/Alt/Meta combos to the app.
-        if mods & (pygame.KMOD_CTRL | pygame.KMOD_ALT | pygame.KMOD_META):
+        # do not fire; leave unknown Ctrl/Alt/Meta combos to the app.
+        if chord:
             return False
+        key = event.key
         if key in (
             pygame.K_LSHIFT,
             pygame.K_RSHIFT,
@@ -692,6 +1002,10 @@ class TextEntry(Widget):
             pygame.K_RCTRL,
             pygame.K_LALT,
             pygame.K_RALT,
+            pygame.K_LMETA,
+            pygame.K_RMETA,
+            pygame.K_LGUI,
+            pygame.K_RGUI,
         ):
             return False
         return True

@@ -11,6 +11,7 @@ from magnetar.widgets import (
     AnchorV,
     DragImageButton,
     EventInterest,
+    KeyEvent,
     TextEntry,
     WIDGET_CHANGED,
     WIDGET_FOCUS,
@@ -298,6 +299,19 @@ def _keydown(key: int, uni: str = "", *, mod: int = 0) -> pygame.event.Event:
     return pygame.event.Event(pygame.KEYDOWN, key=key, unicode=uni, mod=mod)
 
 
+def test_key_event_registry_case_insensitive() -> None:
+    assert KeyEvent["HOME"] is KeyEvent["home"]
+    assert KeyEvent["Kill_To_End"] is KeyEvent.mapping["kill_to_end"]
+    assert KeyEvent["HOME"].match(_keydown(pygame.K_HOME))
+    assert KeyEvent["HOME"].match(_keydown(pygame.K_a, mod=pygame.KMOD_CTRL))
+    assert not KeyEvent["HOME"].match(_keydown(pygame.K_a, "a"))
+    assert KeyEvent["KILL_TO_END"].match(_keydown(pygame.K_k, mod=pygame.KMOD_CTRL))
+    # match any of several events
+    e_miss = _keydown(pygame.K_z)
+    e_hit = _keydown(pygame.K_LEFT)
+    assert KeyEvent["BACKWARD_CHAR"].match(e_miss, e_hit)
+
+
 def test_text_entry_autorepeat_char_via_repeated_keydown() -> None:
     """Held-key auto-repeat is modeled as successive KEYDOWN events (set_repeat)."""
     pygame.display.init()
@@ -380,6 +394,78 @@ def test_text_entry_ctrl_a_e_are_home_end() -> None:
         # Plain a still inserts (no Ctrl).
         assert entry.handle_key(_keydown(pygame.K_a, "a"), size)
         assert entry.text == "helloa"
+    finally:
+        pygame.display.quit()
+
+
+def test_text_entry_emacs_movement_and_kill() -> None:
+    pygame.display.init()
+    pygame.font.init()
+    try:
+        font = pygame.font.Font(None, 24)
+        entry = TextEntry(0, 0, 100, 30, font=font, text="foo bar baz")
+        entry.focus()
+        size = (900, 60)
+
+        # Ctrl+B / Ctrl+F
+        entry.cursor = 4
+        assert entry.handle_key(_keydown(pygame.K_b, mod=pygame.KMOD_CTRL), size)
+        assert entry.cursor == 3
+        assert entry.handle_key(_keydown(pygame.K_f, mod=pygame.KMOD_CTRL), size)
+        assert entry.cursor == 4
+
+        # Alt+F / Alt+B word motion
+        entry.cursor = 0
+        assert entry.handle_key(_keydown(pygame.K_f, mod=pygame.KMOD_ALT), size)
+        assert entry.cursor == 3  # after "foo"
+        assert entry.handle_key(_keydown(pygame.K_f, mod=pygame.KMOD_ALT), size)
+        assert entry.cursor == 7  # after "bar"
+        assert entry.handle_key(_keydown(pygame.K_b, mod=pygame.KMOD_ALT), size)
+        assert entry.cursor == 4  # start of "bar"
+
+        # Ctrl+K kill to end, Ctrl+Y yank
+        entry.cursor = 4
+        assert entry.handle_key(_keydown(pygame.K_k, mod=pygame.KMOD_CTRL), size)
+        assert entry.text == "foo "
+        assert entry._kill_buffer == "bar baz"
+        assert entry.handle_key(_keydown(pygame.K_y, mod=pygame.KMOD_CTRL), size)
+        assert entry.text == "foo bar baz"
+
+        # Ctrl+U kill to start
+        entry.cursor = 4
+        assert entry.handle_key(_keydown(pygame.K_u, mod=pygame.KMOD_CTRL), size)
+        assert entry.text == "bar baz"
+        assert entry.cursor == 0
+
+        # Ctrl+W kill word backward
+        entry.text = "one two"
+        entry.cursor = 7
+        assert entry.handle_key(_keydown(pygame.K_w, mod=pygame.KMOD_CTRL), size)
+        assert entry.text == "one "
+        assert entry._kill_buffer == "two"
+
+        # Alt+D kill word forward
+        entry.text = "one two"
+        entry.cursor = 0
+        assert entry.handle_key(_keydown(pygame.K_d, mod=pygame.KMOD_ALT), size)
+        assert entry.text == " two"
+        assert entry._kill_buffer == "one"
+
+        # Ctrl+D delete char; Ctrl+H backspace
+        entry.text = "ab"
+        entry.cursor = 0
+        assert entry.handle_key(_keydown(pygame.K_d, mod=pygame.KMOD_CTRL), size)
+        assert entry.text == "b"
+        entry.cursor = 1
+        assert entry.handle_key(_keydown(pygame.K_h, mod=pygame.KMOD_CTRL), size)
+        assert entry.text == ""
+
+        # Ctrl+T transpose
+        entry.text = "ab"
+        entry.cursor = 1
+        assert entry.handle_key(_keydown(pygame.K_t, mod=pygame.KMOD_CTRL), size)
+        assert entry.text == "ba"
+        assert entry.cursor == 2
     finally:
         pygame.display.quit()
 
