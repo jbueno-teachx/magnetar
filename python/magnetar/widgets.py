@@ -9,6 +9,7 @@ the widget's box is laid out from that point (default top-left, legacy).
 import enum
 import math
 import os
+import warnings
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Union
 
@@ -981,13 +982,20 @@ class TextEntry(Widget):
             # Whole field for now; later: copy selection when present.
             try:
                 set_text(self._text)
-            except ClipboardError:
-                pass
+            except ClipboardError as exc:
+                warnings.warn(
+                    f"TextEntry COPY failed (clipboard set): {exc}",
+                    stacklevel=2,
+                )
             return True
         if KeyEvent["PASTE"].match(event):
             try:
                 clip = get_text()
-            except ClipboardError:
+            except ClipboardError as exc:
+                warnings.warn(
+                    f"TextEntry PASTE failed (clipboard get): {exc}",
+                    stacklevel=2,
+                )
                 clip = ""
             # Single-line field: drop newlines from multi-line pastes.
             clip = clip.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")

@@ -88,13 +88,34 @@ def test_text_entry_paste_flattens_newlines() -> None:
 
 
 @pytest.mark.clipboard
-def test_tkinter_clipboard_roundtrip() -> None:
-    """Real OS clipboard via tkinter — skip when no display / Tk."""
+def test_system_clipboard_roundtrip() -> None:
+    """Real OS clipboard — skip when no backend is usable."""
     clipboard.reset()
     if not clipboard.available():
-        pytest.skip("tkinter clipboard unavailable (no display / Tk)")
+        pytest.skip("clipboard unavailable (no wl-copy/xclip/Tk)")
     try:
-        clipboard.set_text("magnetar-clip-test")
-        assert clipboard.get_text() == "magnetar-clip-test"
+        marker = "magnetar-clip-test-unique"
+        clipboard.set_text(marker)
+        got = clipboard.get_text()
+        assert got == marker, f"backend={clipboard.backend_name()!r} got={got!r}"
     finally:
         clipboard.reset()
+
+
+def test_text_entry_copy_warns_on_clipboard_error() -> None:
+    pygame.display.init()
+    pygame.font.init()
+    try:
+        entry = TextEntry(0, 0, 50, 20, font=pygame.font.Font(None, 20), text="x")
+        entry.focus()
+        size = (400, 40)
+        with (
+            patch(
+                "magnetar.widgets.set_text",
+                side_effect=clipboard.ClipboardError("boom"),
+            ),
+            pytest.warns(UserWarning, match="COPY failed"),
+        ):
+            entry.handle_key(_keydown(pygame.K_c, mod=pygame.KMOD_CTRL), size)
+    finally:
+        pygame.display.quit()
