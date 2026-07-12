@@ -25,6 +25,8 @@ def test_key_event_copy_paste_combos() -> None:
     assert KeyEvent["COPY"].match(_keydown(pygame.K_c, mod=pygame.KMOD_META))
     assert KeyEvent["COPY"].match(_keydown(pygame.K_c, mod=pygame.KMOD_GUI))
     assert not KeyEvent["COPY"].match(_keydown(pygame.K_c, "c"))
+    assert KeyEvent["CUT"].match(_keydown(pygame.K_x, mod=pygame.KMOD_CTRL))
+    assert KeyEvent["CUT"].match(_keydown(pygame.K_x, mod=pygame.KMOD_META))
     assert KeyEvent["PASTE"].match(_keydown(pygame.K_v, mod=pygame.KMOD_CTRL))
     assert KeyEvent["PASTE"].match(_keydown(pygame.K_v, mod=pygame.KMOD_META))
     assert KeyEvent["PASTE"].match(_keydown(pygame.K_INSERT, mod=pygame.KMOD_SHIFT))

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: CC0-1.0
-"""Single-line text entry widget."""
+"""Single-line text entry widget with selection."""
 
 from __future__ import annotations
 
@@ -27,10 +27,17 @@ from magnetar.widgets.keyevent import KeyEvent
 
 
 class TextEntry(Widget):
-    """Single-line text field with a ``|`` caret between characters.
+    """Single-line text field with a ``|`` caret and optional selection.
 
     Keyboard handling runs only while :attr:`focused`. Length is limited so the
     rendered text fits the on-screen pixel width of the widget.
+
+    Selection
+    ---------
+    - Click + drag highlights a range (reverse colors).
+    - Shift + movement chords extend/shrink the selection.
+    - Plain click places the caret and clears selection.
+    - Typing / paste replaces the selection; Backspace/Delete remove only it.
 
     Posts generic :data:`WIDGET_*` events (via :meth:`post_event`) with extra
     attributes ``text`` and ``cursor``.
@@ -45,11 +52,12 @@ class TextEntry(Widget):
         Ctrl+F / →        forward char
         Alt+B             backward word
         Alt+F             forward word
+        (+ Shift)         extend selection
 
     Deletion / kill (one-slot kill buffer for yank)::
 
-        Ctrl+D / Delete   delete char under cursor
-        Ctrl+H / Backspace  delete char before cursor
+        Ctrl+D / Delete   delete char under cursor (or selection)
+        Ctrl+H / Backspace  delete char before cursor (or selection)
         Ctrl+K            kill to end of line
         Ctrl+U            kill to beginning of line
         Ctrl+W            kill word backward
@@ -57,19 +65,17 @@ class TextEntry(Widget):
         Alt+Backspace     kill word backward
         Ctrl+Y            yank last kill (internal kill buffer)
 
-    System clipboard (currently whole field; selection comes later)::
+    System clipboard::
 
-        Ctrl+C / Ctrl+Shift+C / Cmd+C   copy all text
-        Ctrl+V / Cmd+V / Shift+Insert   paste at caret
+        Ctrl+C / Ctrl+Shift+C / Cmd+C   copy selection (or all if none)
+        Ctrl+X / Cmd+X                  cut selection (or all if none)
+        Ctrl+V / Cmd+V / Shift+Insert   paste (replaces selection)
 
     Other::
 
         Ctrl+T            transpose characters around cursor
         Enter             submit (``WIDGET_SUBMIT``)
         Esc               blur
-
-    Not implemented (multi-line / history / full kill-ring / selection)::
-    Ctrl+P/N history, Ctrl+_ undo, multi-entry kill ring, shift-move select.
     """
 
     def __init__(
@@ -91,6 +97,8 @@ class TextEntry(Widget):
         text_color: tuple[int, int, int] = (0, 255, 255),
         placeholder_color: tuple[int, int, int] = (0, 120, 120),
         caret_color: tuple[int, int, int] = (0, 255, 255),
+        selection_fg: tuple[int, int, int] | None = None,
+        selection_bg: tuple[int, int, int] | None = None,
         padding_px: int = 8,
         caret_blink_ms: int = 530,
     ) -> None:
@@ -102,7 +110,7 @@ class TextEntry(Widget):
             anchor=anchor,
             command=command,
             name=name or "textentry",
-            interest=EventInterest.CLICK | EventInterest.KEY,
+            interest=EventInterest.CLICK | EventInterest.KEY | EventInterest.DRAG,
         )
         self.font = font
         self._text = str(text)
@@ -113,14 +121,24 @@ class TextEntry(Widget):
         self.text_color = text_color
         self.placeholder_color = placeholder_color
         self.caret_color = caret_color
+        # Reverse video defaults: invert text/fill for selected span.
+        self.selection_fg = selection_fg
+        self.selection_bg = selection_bg
         self.padding_px = int(padding_px)
         self.caret_blink_ms = int(caret_blink_ms)
         self.focused = False
         self.cursor = len(self._text)
         self._caret_force_on_until: int = 0
         self._kill_buffer: str = ""
+        # Fixed selection range ``(start, end)`` exclusive end — independent of
+        # the caret so non-Shift movement can move the caret without clearing
+        # the highlight. ``None`` means no selection.
+        self._sel: tuple[int, int] | None = None
+        self._drag_anchor: int | None = None
+        self._mouse_selecting = False
+        self._mouse_dragged = False
 
-    # -- text / caret ---------------------------------------------------------
+    # -- text / caret / selection ---------------------------------------------
 
     @property
     def text(self) -> str:
@@ -129,10 +147,33 @@ class TextEntry(Widget):
     @text.setter
     def text(self, value: str) -> None:
         self._text = str(value)
-        self.cursor = min(self.cursor, len(self._text))
+        n = len(self._text)
+        self.cursor = min(self.cursor, n)
+        if self._sel is not None:
+            a, b = self._sel
+            a, b = min(a, n), min(b, n)
+            self._sel = (a, b) if a != b else None
 
     def set_font(self, font: pygame.font.Font | None) -> None:
         self.font = font
+
+    def has_selection(self) -> bool:
+        return self._sel is not None and self._sel[0] != self._sel[1]
+
+    def selection_range(self) -> tuple[int, int]:
+        """Inclusive-start exclusive-end indices of the selection (or caret, caret)."""
+        if not self.has_selection() or self._sel is None:
+            return (self.cursor, self.cursor)
+        a, b = self._sel
+        return (min(a, b), max(a, b))
+
+    def selected_text(self) -> str:
+        a, b = self.selection_range()
+        return self._text[a:b]
+
+    def clear_selection(self) -> None:
+        self._sel = None
+        self._drag_anchor = None
 
     def focus(self) -> None:
         if self.focused:
@@ -145,6 +186,9 @@ class TextEntry(Widget):
         if not self.focused:
             return
         self.focused = False
+        self.clear_selection()
+        self._mouse_selecting = False
+        self._mouse_dragged = False
         self.post_event(WIDGET_BLUR, text=self._text, cursor=self.cursor)
 
     def clear(self, *, notify: bool = True) -> None:
@@ -152,6 +196,7 @@ class TextEntry(Widget):
             return
         self._text = ""
         self.cursor = 0
+        self.clear_selection()
         self._nudge_caret()
         if notify:
             self.post_event(WIDGET_CHANGED, text=self._text, cursor=self.cursor)
@@ -176,11 +221,27 @@ class TextEntry(Widget):
     def _caret_visible(self) -> bool:
         if not self.focused:
             return False
+        # Caret still blinks when selection exists (caret can move independently).
         now = pygame.time.get_ticks()
         if now < self._caret_force_on_until:
             return True
         period = max(1, self.caret_blink_ms)
         return (now // period) % 2 == 0
+
+    def _sel_colors(self) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+        """Return ``(fg, bg)`` for selected text (reverse of normal)."""
+        if self.selection_fg is not None and self.selection_bg is not None:
+            return self.selection_fg, self.selection_bg
+        bg = self.text_color
+        if self.fill is not None and len(self.fill) >= 3:
+            fg = (int(self.fill[0]), int(self.fill[1]), int(self.fill[2]))
+        else:
+            fg = (0, 0, 0)
+        if self.selection_fg is not None:
+            fg = self.selection_fg
+        if self.selection_bg is not None:
+            bg = self.selection_bg
+        return fg, bg
 
     # -- drawing --------------------------------------------------------------
 
@@ -207,39 +268,93 @@ class TextEntry(Widget):
             surface.blit(label, (inner_x, inner_y))
             return
 
-        before = self._text[: self.cursor]
-        after = self._text[self.cursor :]
+        if self.has_selection():
+            self._draw_with_selection(surface, inner_x, inner_y)
+        else:
+            self._draw_plain(surface, inner_x, inner_y)
+        # Caret always at ``cursor`` (may sit outside a preserved selection).
+        if self._caret_visible():
+            caret_x = inner_x + self._text_pixel_width(self._text[: self.cursor])
+            caret = self.font.render("|", True, self.caret_color)
+            surface.blit(caret, (caret_x - caret.get_width() // 2, inner_y))
+
+    def _draw_plain(self, surface: pygame.Surface, inner_x: int, inner_y: int) -> None:
+        assert self.font is not None
+        if self._text:
+            img = self.font.render(self._text, True, self.text_color)
+            surface.blit(img, (inner_x, inner_y))
+
+    def _draw_with_selection(self, surface: pygame.Surface, inner_x: int, inner_y: int) -> None:
+        assert self.font is not None
+        a, b = self.selection_range()
+        pre, mid, post = self._text[:a], self._text[a:b], self._text[b:]
+        sel_fg, sel_bg = self._sel_colors()
         x = inner_x
-        if before:
-            img = self.font.render(before, True, self.text_color)
+        if pre:
+            img = self.font.render(pre, True, self.text_color)
             surface.blit(img, (x, inner_y))
             x += img.get_width()
-
-        if self._caret_visible():
-            # Literal "|" caret between characters.
-            caret = self.font.render("|", True, self.caret_color)
-            cx = x - caret.get_width() // 2
-            surface.blit(caret, (cx, inner_y))
-            x = max(x, cx + caret.get_width() // 2)
-
-        if after:
-            img = self.font.render(after, True, self.text_color)
+        if mid:
+            img = self.font.render(mid, True, sel_fg)
+            bar = pygame.Rect(x, inner_y, img.get_width(), self.font.get_height())
+            pygame.draw.rect(surface, sel_bg, bar)
+            surface.blit(img, (x, inner_y))
+            x += img.get_width()
+        if post:
+            img = self.font.render(post, True, self.text_color)
             surface.blit(img, (x, inner_y))
 
     # -- pointer / keyboard ---------------------------------------------------
 
     def on_event(self, event: WidgetPointerEvent, screen_size: ScreenSize) -> bool:
         if event.kind == "down" and event.button == 1:
-            return True
-        if event.kind == "click" and event.button == 1:
             self.focus()
-            if self.font is not None:
-                rect = self.screen_rect(screen_size)
-                local_x = event.pos[0] - rect.x - self.padding_px
-                self.cursor = self._index_for_x(local_x)
-                self._nudge_caret()
+            idx = self._index_at_pos(event.pos, screen_size)
+            self._drag_anchor = idx
+            self.cursor = idx
+            # New press starts a potential selection; collapse until drag moves.
+            self._sel = None
+            self._mouse_selecting = True
+            self._mouse_dragged = False
+            self._nudge_caret()
             return True
+
+        if event.kind == "drag" and self._mouse_selecting:
+            idx = self._index_at_pos(event.pos, screen_size)
+            if idx != self.cursor:
+                self._mouse_dragged = True
+            self.cursor = idx
+            if self._drag_anchor is not None and idx != self._drag_anchor:
+                a, b = self._drag_anchor, idx
+                self._sel = (min(a, b), max(a, b))
+            else:
+                self._sel = None
+            self._nudge_caret()
+            return True
+
+        if event.kind == "up" and event.button == 1:
+            self._mouse_selecting = False
+            if self._sel is not None and self._sel[0] == self._sel[1]:
+                self.clear_selection()
+            return True
+
+        if event.kind == "click" and event.button == 1:
+            # Pure click (no drag): place caret and clear selection.
+            if not self._mouse_dragged:
+                idx = self._index_at_pos(event.pos, screen_size)
+                self.cursor = idx
+                self.clear_selection()
+                self._nudge_caret()
+            self._mouse_dragged = False
+            self._drag_anchor = None
+            return True
+
         return False
+
+    def _index_at_pos(self, pos: tuple[int, int], screen_size: ScreenSize) -> int:
+        rect = self.screen_rect(screen_size)
+        local_x = pos[0] - rect.x - self.padding_px
+        return self._index_for_x(local_x)
 
     def _index_for_x(self, local_x: int) -> int:
         if local_x <= 0 or not self._text:
@@ -262,7 +377,6 @@ class TextEntry(Widget):
     def _word_left(self, pos: int) -> int:
         """Index of the start of the word at/before ``pos`` (readline M-b)."""
         i = max(0, min(pos, len(self._text)))
-        # Skip separators left of the caret.
         while i > 0 and not self._is_word_char(self._text[i - 1]):
             i -= 1
         while i > 0 and self._is_word_char(self._text[i - 1]):
@@ -279,6 +393,41 @@ class TextEntry(Widget):
             i += 1
         return i
 
+    def _move_to(self, new_pos: int, *, extend: bool) -> None:
+        new_pos = max(0, min(int(new_pos), len(self._text)))
+        if extend:
+            # Shift+move: grow/shrink selection; anchor is the stable end.
+            if self._sel is None:
+                anchor = self.cursor
+            else:
+                a, b = self.selection_range()
+                # Keep the end that is not under the caret as the anchor.
+                if self.cursor <= a:
+                    anchor = b
+                elif self.cursor >= b:
+                    anchor = a
+                else:
+                    # Caret inside selection: extend from nearer edge.
+                    anchor = a if abs(self.cursor - a) <= abs(self.cursor - b) else b
+            self.cursor = new_pos
+            if anchor == new_pos:
+                self._sel = None
+            else:
+                self._sel = (min(anchor, new_pos), max(anchor, new_pos))
+        else:
+            # Non-selecting move: relocate caret only; keep existing highlight.
+            self.cursor = new_pos
+        self._nudge_caret()
+
+    def _delete_selection(self, *, kill: bool = False) -> bool:
+        """Delete the selected range. Return True if there was a selection."""
+        if not self.has_selection():
+            return False
+        a, b = self.selection_range()
+        self.clear_selection()
+        self._delete_range(a, b, kill=kill)
+        return True
+
     def _delete_range(self, start: int, end: int, *, kill: bool) -> None:
         """Remove ``text[start:end]``; if ``kill``, store it for Ctrl+Y."""
         start = max(0, min(start, len(self._text)))
@@ -290,16 +439,18 @@ class TextEntry(Widget):
             self._kill_buffer = chunk
         self._text = self._text[:start] + self._text[end:]
         self.cursor = start
+        self.clear_selection()
         self._nudge_caret()
         self.post_event(WIDGET_CHANGED, text=self._text, cursor=self.cursor)
 
     def _insert_text(self, s: str, screen_size: ScreenSize) -> bool:
-        """Insert ``s`` at the caret if it fits. Return True if anything inserted."""
+        """Insert ``s`` at the caret (replacing selection) if it fits."""
+        if self.has_selection():
+            self._delete_selection(kill=False)
         if not s:
             return False
         candidate = self._text[: self.cursor] + s + self._text[self.cursor :]
         if not self._fits(candidate, screen_size):
-            # Insert as many prefix chars as fit (yank may be long).
             kept = ""
             for ch in s:
                 trial = self._text[: self.cursor] + kept + ch + self._text[self.cursor :]
@@ -312,21 +463,19 @@ class TextEntry(Widget):
             candidate = self._text[: self.cursor] + s + self._text[self.cursor :]
         self._text = candidate
         self.cursor += len(s)
+        self.clear_selection()
         self._nudge_caret()
         self.post_event(WIDGET_CHANGED, text=self._text, cursor=self.cursor)
         return True
 
+    def _clipboard_payload(self) -> str:
+        """Text for copy/cut: selection if any, else the whole field."""
+        if self.has_selection():
+            return self.selected_text()
+        return self._text
+
     def handle_key(self, event: pygame.event.Event, screen_size: ScreenSize) -> bool:
-        """Handle a ``KEYDOWN`` while focused. Return True if consumed.
-
-        Auto-repeat is not implemented inside the widget: when
-        :func:`pygame.key.set_repeat` is enabled (see :class:`~magnetar.app.MagnetarApp`),
-        the OS/SDL posts additional ``KEYDOWN`` events for a held key, and each is
-        handled here the same as a fresh press.
-
-        Bindings are named :class:`KeyEvent` entries (e.g. ``KeyEvent["HOME"]``).
-        See the class docstring for the Emacs/readline map.
-        """
+        """Handle a ``KEYDOWN`` while focused. Return True if consumed."""
         if not self.focused or not self.enabled or not self.visible:
             return False
         if event.type != pygame.KEYDOWN:
@@ -334,70 +483,93 @@ class TextEntry(Widget):
 
         mods = int(getattr(event, "mod", 0) or 0)
         chord = bool(mods & KeyEvent._CHORD_MODS)
+        extend = bool(mods & pygame.KMOD_SHIFT)
 
-        # --- movement --------------------------------------------------------
+        # --- movement (Shift extends selection) ------------------------------
         if KeyEvent["BACKWARD_CHAR"].match(event):
-            if self.cursor > 0:
-                self.cursor -= 1
-                self._nudge_caret()
+            self._move_to(self.cursor - 1, extend=extend)
             return True
         if KeyEvent["FORWARD_CHAR"].match(event):
-            if self.cursor < len(self._text):
-                self.cursor += 1
-                self._nudge_caret()
+            self._move_to(self.cursor + 1, extend=extend)
             return True
         if KeyEvent["BACKWARD_WORD"].match(event):
-            self.cursor = self._word_left(self.cursor)
-            self._nudge_caret()
+            self._move_to(self._word_left(self.cursor), extend=extend)
             return True
         if KeyEvent["FORWARD_WORD"].match(event):
-            self.cursor = self._word_right(self.cursor)
-            self._nudge_caret()
+            self._move_to(self._word_right(self.cursor), extend=extend)
             return True
         if KeyEvent["HOME"].match(event):
-            self.cursor = 0
-            self._nudge_caret()
+            self._move_to(0, extend=extend)
             return True
         if KeyEvent["END"].match(event):
-            self.cursor = len(self._text)
-            self._nudge_caret()
+            self._move_to(len(self._text), extend=extend)
             return True
 
         # --- deletion / kill / yank ------------------------------------------
         if KeyEvent["KILL_WORD_BACKWARD"].match(event):
-            start = self._word_left(self.cursor)
-            self._delete_range(start, self.cursor, kill=True)
+            if self.has_selection():
+                self._delete_selection(kill=True)
+            else:
+                start = self._word_left(self.cursor)
+                self._delete_range(start, self.cursor, kill=True)
             return True
         if KeyEvent["BACKSPACE"].match(event):
-            if self.cursor > 0:
+            if self.has_selection():
+                self._delete_selection(kill=False)
+            elif self.cursor > 0:
                 self._delete_range(self.cursor - 1, self.cursor, kill=False)
             return True
         if KeyEvent["DELETE_CHAR"].match(event):
-            if self.cursor < len(self._text):
+            if self.has_selection():
+                self._delete_selection(kill=False)
+            elif self.cursor < len(self._text):
                 self._delete_range(self.cursor, self.cursor + 1, kill=False)
             return True
         if KeyEvent["KILL_TO_END"].match(event):
-            self._delete_range(self.cursor, len(self._text), kill=True)
+            if self.has_selection():
+                self._delete_selection(kill=True)
+            else:
+                self._delete_range(self.cursor, len(self._text), kill=True)
             return True
         if KeyEvent["KILL_TO_START"].match(event):
-            self._delete_range(0, self.cursor, kill=True)
+            if self.has_selection():
+                self._delete_selection(kill=True)
+            else:
+                self._delete_range(0, self.cursor, kill=True)
             return True
         if KeyEvent["KILL_WORD_FORWARD"].match(event):
-            end = self._word_right(self.cursor)
-            self._delete_range(self.cursor, end, kill=True)
+            if self.has_selection():
+                self._delete_selection(kill=True)
+            else:
+                end = self._word_right(self.cursor)
+                self._delete_range(self.cursor, end, kill=True)
             return True
         if KeyEvent["YANK"].match(event):
             self._insert_text(self._kill_buffer, screen_size)
             return True
         if KeyEvent["COPY"].match(event):
-            # Whole field for now; later: copy selection when present.
             try:
-                set_text(self._text)
+                set_text(self._clipboard_payload())
             except ClipboardError as exc:
                 warnings.warn(
                     f"TextEntry COPY failed (clipboard set): {exc}",
                     stacklevel=2,
                 )
+            return True
+        if KeyEvent["CUT"].match(event):
+            payload = self._clipboard_payload()
+            try:
+                set_text(payload)
+            except ClipboardError as exc:
+                warnings.warn(
+                    f"TextEntry CUT failed (clipboard set): {exc}",
+                    stacklevel=2,
+                )
+                return True
+            if self.has_selection():
+                self._delete_selection(kill=False)
+            else:
+                self.clear(notify=True)
             return True
         if KeyEvent["PASTE"].match(event):
             try:
@@ -408,12 +580,12 @@ class TextEntry(Widget):
                     stacklevel=2,
                 )
                 clip = ""
-            # Single-line field: drop newlines from multi-line pastes.
             clip = clip.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
             self._insert_text(clip, screen_size)
             return True
         if KeyEvent["TRANSPOSE"].match(event):
-            # Swap char before caret with char at caret; at EOL swap last two.
+            if self.has_selection():
+                self.clear_selection()
             n = len(self._text)
             if n >= 2:
                 if self.cursor == 0:
@@ -451,8 +623,6 @@ class TextEntry(Widget):
             self._insert_text(ch, screen_size)
             return True
 
-        # Consume un-modified keys while focused so global bindings (e.g. bare ``q``)
-        # do not fire; leave unknown Ctrl/Alt/Meta combos to the app.
         if chord:
             return False
         key = event.key

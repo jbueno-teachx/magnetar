@@ -499,3 +499,130 @@ def test_app_enables_key_repeat() -> None:
         assert interval == KEY_REPEAT_INTERVAL_MS
     finally:
         app._shutdown_pygame()
+
+
+def test_text_entry_shift_arrow_selects() -> None:
+    pygame.display.init()
+    pygame.font.init()
+    try:
+        entry = TextEntry(0, 0, 100, 30, font=pygame.font.Font(None, 24), text="abcdef")
+        entry.focus()
+        entry.cursor = 2
+        size = (800, 60)
+        assert entry.handle_key(_keydown(pygame.K_RIGHT, mod=pygame.KMOD_SHIFT), size)
+        assert entry.handle_key(_keydown(pygame.K_RIGHT, mod=pygame.KMOD_SHIFT), size)
+        assert entry.has_selection()
+        assert entry.selection_range() == (2, 4)
+        assert entry.selected_text() == "cd"
+        # Plain move preserves selection; only relocates caret.
+        assert entry.handle_key(_keydown(pygame.K_LEFT), size)
+        assert entry.has_selection()
+        assert entry.selection_range() == (2, 4)
+        assert entry.cursor == 3
+    finally:
+        pygame.display.quit()
+
+
+def test_text_entry_mouse_drag_selects() -> None:
+    pygame.display.init()
+    pygame.font.init()
+    try:
+        font = pygame.font.Font(None, 24)
+        entry = TextEntry(0, 0, 100, 50, font=font, text="hello")
+        reg = WidgetRegistry()
+        reg.add(entry)
+        size = (400, 100)
+
+        # Screen rect is full width 0..400; pad 8
+        # Index positions via font widths
+        def x_for(i: int) -> int:
+            return 8 + font.size(entry.text[:i])[0]
+
+        down = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(x_for(1), 20), button=1)
+        assert reg.dispatch(down, size)
+        drag = pygame.event.Event(
+            pygame.MOUSEMOTION, pos=(x_for(4), 20), rel=(10, 0), buttons=(1, 0, 0)
+        )
+        assert reg.dispatch(drag, size)
+        up = pygame.event.Event(pygame.MOUSEBUTTONUP, pos=(x_for(4), 20), button=1)
+        assert reg.dispatch(up, size)
+        assert entry.has_selection()
+        a, b = entry.selection_range()
+        assert entry.text[a:b] == "ell"
+    finally:
+        pygame.display.quit()
+
+
+def test_text_entry_click_clears_selection() -> None:
+    pygame.display.init()
+    pygame.font.init()
+    try:
+        font = pygame.font.Font(None, 24)
+        entry = TextEntry(0, 0, 100, 50, font=font, text="hello")
+        entry.focus()
+        entry._sel = (0, 5)
+        entry.cursor = 5
+        assert entry.has_selection()
+        size = (400, 100)
+        reg = WidgetRegistry()
+        reg.add(entry)
+        # Click without drag mid-field
+        x = 8 + font.size("he")[0]
+        assert reg.dispatch(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(x, 20), button=1), size)
+        assert reg.dispatch(pygame.event.Event(pygame.MOUSEBUTTONUP, pos=(x, 20), button=1), size)
+        assert not entry.has_selection()
+    finally:
+        pygame.display.quit()
+
+
+def test_text_entry_type_and_delete_replace_selection() -> None:
+    pygame.display.init()
+    pygame.font.init()
+    try:
+        entry = TextEntry(0, 0, 100, 30, font=pygame.font.Font(None, 24), text="abcdef")
+        entry.focus()
+        entry._sel = (1, 4)  # "bcd"
+        entry.cursor = 4
+        size = (800, 60)
+        assert entry.handle_key(_keydown(pygame.K_x, "x"), size)
+        assert entry.text == "axef"
+        assert not entry.has_selection()
+
+        entry._sel = (1, 3)  # "xe"
+        entry.cursor = 3
+        assert entry.handle_key(_keydown(pygame.K_BACKSPACE), size)
+        assert entry.text == "af"
+        assert not entry.has_selection()
+
+        entry.text = "hello"
+        entry._sel = (0, 2)
+        entry.cursor = 2
+        assert entry.handle_key(_keydown(pygame.K_DELETE), size)
+        assert entry.text == "llo"
+    finally:
+        pygame.display.quit()
+
+
+def test_text_entry_cut_selection_to_clipboard() -> None:
+    pygame.display.init()
+    pygame.font.init()
+    try:
+        entry = TextEntry(0, 0, 100, 30, font=pygame.font.Font(None, 24), text="hello")
+        entry.focus()
+        entry._sel = (1, 4)  # "ell"
+        entry.cursor = 4
+        size = (800, 60)
+        store: dict[str, str] = {}
+
+        def fake_set(s: str) -> None:
+            store["t"] = s
+
+        from unittest.mock import patch
+
+        with patch("magnetar.widgets.textentry.set_text", side_effect=fake_set):
+            assert entry.handle_key(_keydown(pygame.K_x, mod=pygame.KMOD_CTRL), size)
+        assert store["t"] == "ell"
+        assert entry.text == "ho"
+        assert not entry.has_selection()
+    finally:
+        pygame.display.quit()

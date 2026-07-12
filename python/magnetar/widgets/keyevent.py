@@ -186,6 +186,11 @@ KeyEvent(
     (KeyEvent.META, "C"),
 )
 KeyEvent(
+    "CUT",
+    (KeyEvent.CTRL, "X"),
+    (KeyEvent.META, "X"),
+)
+KeyEvent(
     "PASTE",
     (KeyEvent.CTRL, "V"),
     (KeyEvent.META, "V"),
