@@ -68,6 +68,11 @@ class Particle:
     """A particle in continuous 3D space: mass, kinematics, pinning.
 
     Knows nothing about rendering, sprite groups, or screen projection.
+
+    Cooperative ``**kwargs`` (forwarded via :func:`super`, not consumed here)::
+
+        color, world, sprite_frame, sprite_tag
+            — :class:`ScreenSprite` (when mixed into a sprite subclass)
     """
 
     def __init__(
@@ -77,7 +82,9 @@ class Particle:
         mass: Gram | float = DEFAULT_MASS,
         pinned: bool = False,
         label: str = "",
+        **kwargs: object,
     ) -> None:
+        super().__init__(**kwargs)
         self.position = as_position(position)
         self.mass = gram(mass)
         self.label = label
@@ -130,7 +137,12 @@ class Particle:
 
 
 class ElectroParticle(Particle):
-    """Charged particle (physics only). ``charge`` is set at construction."""
+    """Charged particle (physics only). ``charge`` is set at construction.
+
+    Cooperative ``**kwargs`` (forwarded via :func:`super`)::
+
+        color, world, sprite_frame, sprite_tag — :class:`ScreenSprite`
+    """
 
     def __init__(
         self,
@@ -140,6 +152,7 @@ class ElectroParticle(Particle):
         pinned: bool = False,
         charge: Coulomb | float = DEFAULT_CHARGE,
         label: str = "",
+        **kwargs: object,
     ) -> None:
         super().__init__(
             position,
@@ -147,6 +160,7 @@ class ElectroParticle(Particle):
             mass=mass,
             pinned=pinned,
             label=label,
+            **kwargs,
         )
         self.charge = coulomb(charge)
 
@@ -162,6 +176,19 @@ class ScreenSprite(pygame.sprite.Sprite):
     ``image`` is loaded via :class:`~magnetar.assets.ParticleImageBank` (not App).
     ``rect`` needs World→App→view for 3D projection. Co-inherited types supply
     ``position`` (from :class:`Particle`).
+
+    In MI hierarchies this class sits just above :class:`pygame.sprite.Sprite` in
+    the MRO so Sprite is the base-most ``__init__`` we deliberately reach.
+
+    Known parameters consumed here
+    ------------------------------
+    color, world, sprite_frame, sprite_tag
+
+    Cooperative ``*args`` / ``**kwargs``
+    ------------------------------------
+    Forwarded to :class:`pygame.sprite.Sprite` (typically empty; may include
+    sprite *groups* if a caller supplies them). Unknown keyword leftovers will
+    fail at Sprite / ``object`` — do not silently drop them.
     """
 
     color: str
@@ -171,13 +198,14 @@ class ScreenSprite(pygame.sprite.Sprite):
 
     def __init__(
         self,
-        *,
+        *args: object,
         color: str = DEFAULT_PARTICLE_COLOR,
         world: World | None = None,
         sprite_frame: int = 0,
         sprite_tag: str | None = None,
+        **kwargs: object,
     ) -> None:
-        super().__init__()
+        super().__init__(*args, **kwargs)
         self.color = _normalize_color(color)
         self._world_ref = weakref.ref(world) if world is not None else None
         self.sprite_frame = int(sprite_frame)
@@ -283,7 +311,8 @@ class ScreenSprite(pygame.sprite.Sprite):
 class ParticleSprite(Particle, ScreenSprite):
     """Renderable particle: physics (:class:`Particle`) + pygame display.
 
-    Multiple inheritance of :class:`Particle` and :class:`ScreenSprite`.
+    MRO: ``ParticleSprite → Particle → ScreenSprite → Sprite → object``.
+    Single :func:`super` call; each base peels its own parameters.
     """
 
     def __init__(
@@ -299,16 +328,12 @@ class ParticleSprite(Particle, ScreenSprite):
         sprite_frame: int = 0,
         sprite_tag: str | None = None,
     ) -> None:
-        Particle.__init__(
-            self,
+        super().__init__(
             position,
             velocity=velocity,
             mass=mass,
             pinned=pinned,
             label=label,
-        )
-        ScreenSprite.__init__(
-            self,
             color=color,
             world=world,
             sprite_frame=sprite_frame,
@@ -317,7 +342,11 @@ class ParticleSprite(Particle, ScreenSprite):
 
 
 class ElectroParticleSprite(ElectroParticle, ScreenSprite):
-    """Renderable charged particle: :class:`ElectroParticle` + pygame display."""
+    """Renderable charged particle: :class:`ElectroParticle` + pygame display.
+
+    MRO: ``ElectroParticleSprite → ElectroParticle → Particle → ScreenSprite
+    → Sprite → object``. One ``__init__``, one :func:`super` call.
+    """
 
     def __init__(
         self,
@@ -333,17 +362,13 @@ class ElectroParticleSprite(ElectroParticle, ScreenSprite):
         sprite_frame: int = 0,
         sprite_tag: str | None = None,
     ) -> None:
-        ElectroParticle.__init__(
-            self,
+        super().__init__(
             position,
             velocity=velocity,
             mass=mass,
             pinned=pinned,
             charge=charge,
             label=label,
-        )
-        ScreenSprite.__init__(
-            self,
             color=color,
             world=world,
             sprite_frame=sprite_frame,

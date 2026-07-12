@@ -27,6 +27,7 @@ htmlcov/
 .idea/
 .vscode/
 *.swp
+*.kate-swp
 *~
 .DS_Store
 
