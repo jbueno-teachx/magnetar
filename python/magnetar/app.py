@@ -21,7 +21,14 @@ from magnetar.assets import DEFAULT_HUD_FONT_SIZE, hud_font_path
 from magnetar.prompt import InteractivePrompt
 from magnetar.units import coulomb, gram, meters, second
 from magnetar.view3d import ViewCamera
-from magnetar.widgets import DragImageButton, WidgetRegistry, make_curved_arrows_icon
+from magnetar.widgets import (
+    Anchor,
+    DragImageButton,
+    TextEntry,
+    WIDGET_SUBMIT,
+    WidgetRegistry,
+    make_curved_arrows_icon,
+)
 from magnetar.world import World
 
 # ---------------------------------------------------------------------------
@@ -60,8 +67,24 @@ ROTATE_DRAG_DEGREES_PER_PIXEL = 0.35
 # Half the original control size; parked in the bottom-right corner.
 ROTATE_WIDGET_W_PCT = 6.0
 ROTATE_WIDGET_H_PCT = 8.0
-ROTATE_WIDGET_X_PCT = 100.0 - ROTATE_WIDGET_W_PCT - 2.0  # 2% margin from right
-ROTATE_WIDGET_Y_PCT = 100.0 - ROTATE_WIDGET_H_PCT - 2.0  # 2% margin from bottom
+# Anchor point = bottom-right of the control (margin from window edges).
+UI_MARGIN_PCT = 2.0
+ROTATE_WIDGET_X_PCT = 100.0 - UI_MARGIN_PCT  # right edge
+ROTATE_WIDGET_Y_PCT = 100.0 - UI_MARGIN_PCT  # bottom edge
+ROTATE_WIDGET_ANCHOR = Anchor(h="right", v="bottom")
+
+# In-window command line — same bottom edge as the orbit control.
+PROMPT_WIDGET_H_PCT = 4.5
+PROMPT_WIDGET_X_PCT = 1.0  # left edge
+PROMPT_WIDGET_Y_PCT = ROTATE_WIDGET_Y_PCT  # shared bottom with orbit button
+PROMPT_WIDGET_ANCHOR = Anchor(h="left", v="bottom")
+# Stretch almost to the orbit control's left edge (orbit is right-anchored).
+PROMPT_WIDGET_W_PCT = (ROTATE_WIDGET_X_PCT - ROTATE_WIDGET_W_PCT) - PROMPT_WIDGET_X_PCT - 1.0
+
+# pygame KEYDOWN auto-repeat while a key is held (TextEntry, etc.).
+# delay = ms before first repeat; interval = ms between subsequent repeats.
+KEY_REPEAT_DELAY_MS = 400
+KEY_REPEAT_INTERVAL_MS = 35
 
 
 Vec2 = Tuple[float, float]
@@ -129,6 +152,7 @@ class MagnetarApp:
         # In-window UI (registry filled after pygame init when surfaces exist).
         self.widgets = WidgetRegistry()
         self._orbit_button: DragImageButton | None = None
+        self._prompt_entry: TextEntry | None = None
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -173,6 +197,22 @@ class MagnetarApp:
             if event.type == pygame.QUIT:
                 self.running = False
                 continue
+
+            # Generic widget signals (usable by any Widget subclass).
+            if event.type == WIDGET_SUBMIT:
+                self._on_widget_submit(event)
+                continue
+
+            # Mouse / key → widget registry first (focused TextEntry eats typing).
+            if event.type in (
+                pygame.MOUSEBUTTONDOWN,
+                pygame.MOUSEBUTTONUP,
+                pygame.MOUSEMOTION,
+                pygame.KEYDOWN,
+            ):
+                if self.widgets.dispatch(event, screen_size):
+                    continue
+
             if event.type == pygame.KEYDOWN and event.key in (
                 pygame.K_ESCAPE,
                 pygame.K_q,
@@ -180,17 +220,19 @@ class MagnetarApp:
                 self.running = False
                 continue
 
-            # Mouse → widget registry (mask gates work inside dispatch).
-            if event.type in (
-                pygame.MOUSEBUTTONDOWN,
-                pygame.MOUSEBUTTONUP,
-                pygame.MOUSEMOTION,
-            ):
-                if self.widgets.dispatch(event, screen_size):
-                    continue
-
         if self.prompt.poll() is False:
             self.running = False
+
+    def _on_widget_submit(self, event: pygame.event.Event) -> None:
+        """Handle :data:`~magnetar.widgets.WIDGET_SUBMIT` (not wired to REPL yet)."""
+        text = getattr(event, "text", None)
+        if text is None and getattr(event, "widget", None) is not None:
+            text = getattr(event.widget, "text", "")
+        line = "" if text is None else str(text)
+        # Temporary observability for the in-window line; REPL wiring comes later.
+        print(line, flush=True)
+        if self._prompt_entry is not None and getattr(event, "widget", None) is self._prompt_entry:
+            self._prompt_entry.clear(notify=False)
 
     # -- view API proxies (delegate to self.view) ------------------------------
 
@@ -294,7 +336,7 @@ class MagnetarApp:
                 f"pitch={math.degrees(pitch):+.1f}°  "
                 f"roll={math.degrees(roll):+.1f}°"
             ),
-            "orbit: drag / click sides; center resets  |  Esc/q/Ctrl+D quit",
+            "orbit: drag / click sides; center resets  |  click bottom line to type  |  Esc/q quit",
         ]
         y = 8
         for line in lines:
@@ -333,11 +375,31 @@ class MagnetarApp:
             ROTATE_WIDGET_W_PCT,
             ROTATE_WIDGET_H_PCT,
             icon,
+            anchor=ROTATE_WIDGET_ANCHOR,
             name="orbit",
             command=self._on_orbit_click,
             on_drag=self._on_orbit_drag,
         )
         self.widgets.add(self._orbit_button)
+
+        self._prompt_entry = TextEntry(
+            PROMPT_WIDGET_X_PCT,
+            PROMPT_WIDGET_Y_PCT,
+            PROMPT_WIDGET_W_PCT,
+            PROMPT_WIDGET_H_PCT,
+            anchor=PROMPT_WIDGET_ANCHOR,
+            font=self.font,
+            name="prompt",
+            placeholder="magnetar> ",
+            border=THEME_COLOR,
+            border_focused=(0, 255, 200),
+            text_color=THEME_COLOR,
+            placeholder_color=(0, 120, 120),
+            caret_color=THEME_COLOR,
+        )
+        self.widgets.add(self._prompt_entry)
+        # Ready for typing without an extra click during this experiment.
+        self.widgets.set_focus(self._prompt_entry)
 
     def _on_orbit_click(self, zone: str) -> None:
         """Discrete orbit step from the *current* orientation, or reset on center.
@@ -372,8 +434,14 @@ class MagnetarApp:
         pygame.font.init()
         if pygame.mixer.get_init() is not None:
             pygame.mixer.quit()
+        # Held keys re-fire KEYDOWN (printable, arrows, backspace, …) for TextEntry.
+        pygame.key.set_repeat(KEY_REPEAT_DELAY_MS, KEY_REPEAT_INTERVAL_MS)
 
     def _shutdown_pygame(self) -> None:
+        try:
+            pygame.key.set_repeat()  # disable
+        except pygame.error:
+            pass
         pygame.quit()
         self.font = None
         self.screen = None
