@@ -8,7 +8,7 @@ will grow around these defaults.
 import math
 import os
 import sys
-from typing import Callable, Iterable, List, Sequence, Tuple
+from typing import Callable, Iterable, Sequence, Tuple
 
 # Do not let SDL open a real audio device — pygame.init() would otherwise
 # initialize the mixer and can pause / preempt other apps' playback.
@@ -20,7 +20,7 @@ import pygame
 from magnetar.assets import DEFAULT_HUD_FONT_SIZE, hud_font_path
 from magnetar.prompt import InteractivePrompt
 from magnetar.units import coulomb, gram, meters, second
-from magnetar.view3d import IDENTITY_MAT3, ViewCamera
+from magnetar.view3d import ViewCamera
 from magnetar.widgets import DragImageButton, WidgetRegistry, make_curved_arrows_icon
 from magnetar.world import World
 
@@ -167,9 +167,7 @@ class MagnetarApp:
     def events(self) -> None:
         """Poll pygame events, widget registry, and the interactive prompt."""
         screen_size = (
-            self.screen.get_size()
-            if self.screen is not None
-            else (VIEW_WIDTH, VIEW_HEIGHT)
+            self.screen.get_size() if self.screen is not None else (VIEW_WIDTH, VIEW_HEIGHT)
         )
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -367,7 +365,6 @@ class MagnetarApp:
         self.view.orbit_camera(dx * sens, -dy * sens)
 
     # -- pygame init / teardown -----------------------------------------------
-
 
     def _init_pygame(self) -> None:
         """Initialize only the subsystems we need — never the audio mixer."""

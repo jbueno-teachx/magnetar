@@ -9,10 +9,9 @@ separate ``contextvars.Context``s or an explicit app argument to projection.
 
 import contextvars
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Sequence, Tuple
 
-import pygame
 
 from magnetar.units import meters
 from magnetar.world import World

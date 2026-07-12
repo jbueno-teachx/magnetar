@@ -46,9 +46,7 @@ def test_registry_mask_and_click_command() -> None:
 
         hits: list[str] = []
         img = make_curved_arrows_icon(32)
-        btn = DragImageButton(
-            0, 0, 50, 50, img, command=lambda q: hits.append(q), name="orb"
-        )
+        btn = DragImageButton(0, 0, 50, 50, img, command=lambda q: hits.append(q), name="orb")
         reg.add(btn)
         assert EventInterest.CLICK in reg.interest_mask
         assert EventInterest.DRAG in reg.interest_mask
@@ -87,14 +85,10 @@ def test_registry_drag_capture_outside_widget() -> None:
         )
         # Move outside while held
         assert reg.dispatch(
-            pygame.event.Event(
-                pygame.MOUSEMOTION, pos=(90, 10), rel=(80, 0), buttons=(1, 0, 0)
-            ),
+            pygame.event.Event(pygame.MOUSEMOTION, pos=(90, 10), rel=(80, 0), buttons=(1, 0, 0)),
             size,
         )
-        assert reg.dispatch(
-            pygame.event.Event(pygame.MOUSEBUTTONUP, pos=(90, 10), button=1), size
-        )
+        assert reg.dispatch(pygame.event.Event(pygame.MOUSEBUTTONUP, pos=(90, 10), button=1), size)
         assert drags  # at least one drag callback
         assert sum(d[0] for d in drags) != 0
     finally:
@@ -102,7 +96,7 @@ def test_registry_drag_capture_outside_widget() -> None:
 
 
 def test_orbit_click_rotates_app_view() -> None:
-    from magnetar.app import MagnetarApp, ROTATE_CLICK_DEGREES
+    from magnetar.app import MagnetarApp
     from magnetar.view3d import IDENTITY_MAT3
     from magnetar.units import meters
 
