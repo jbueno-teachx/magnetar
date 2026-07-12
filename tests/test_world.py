@@ -2,7 +2,7 @@
 import pytest
 import pygame
 
-from magnetar.particles import ElectroParticle, Particle
+from magnetar.particles import ElectroParticle, Particle, ParticleSprite, ScreenSprite
 from magnetar.units import (
     Coulomb,
     Gram,
@@ -36,6 +36,7 @@ def test_add_electro_and_step() -> None:
         velocity=(1.0, 0.0, 0.0),  # m/s
     )
     assert isinstance(p, ElectroParticle)
+    assert isinstance(p, ScreenSprite)
     assert isinstance(p, pygame.sprite.Sprite)
     assert p.charge == coulomb(1.0)
     assert p.mass == gram(2.0)
@@ -70,6 +71,7 @@ def test_pinned_particle_does_not_move() -> None:
 def test_pinned_velocity_assignment_raises() -> None:
     p = Particle(meters(0, 0, 0), velocity=(1, 0, 0), pinned=True)
     assert p.velocity == (0.0, 0.0, 0.0)
+    assert not isinstance(p, pygame.sprite.Sprite)
     with pytest.raises(ValueError, match="pinned"):
         p.velocity = (1.0, 0.0, 0.0)
 
@@ -99,6 +101,7 @@ def test_base_particle_has_mass() -> None:
     world = World()
     p = world.add_particle(meters(0.0, 1.0, 0.0), mass=gram(3.5))
     assert isinstance(p, Particle)
+    assert isinstance(p, ParticleSprite)
     assert not isinstance(p, ElectroParticle)
     assert p.mass == gram(3.5)
     assert grams_to_kg(p.mass) == 0.0035

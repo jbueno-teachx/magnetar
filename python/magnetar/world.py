@@ -3,7 +3,7 @@
 
 import contextvars
 import os
-from typing import TYPE_CHECKING, Any, Iterable, Optional
+from typing import Any, Iterable
 
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
@@ -12,14 +12,13 @@ import pygame
 from magnetar.particles import (
     DEFAULT_CHARGE,
     DEFAULT_MASS,
-    ElectroParticle,
+    ElectroParticleSprite,
     Particle,
+    ParticleSprite,
+    ScreenSprite,
     Velocity3,
 )
 from magnetar.units import Coulomb, Gram, Position, Second, as_position, coulomb, gram, second
-
-if TYPE_CHECKING:
-    pass
 
 
 class World:
@@ -56,7 +55,7 @@ class World:
 
     # -- particle group -------------------------------------------------------
 
-    def add(self, particle: Particle) -> Particle:
+    def add(self, particle: ScreenSprite) -> ScreenSprite:
         """Attach ``particle`` to this world and add it to the sprite group."""
         particle.attach_world(self)
         self.particles.add(particle)
@@ -71,17 +70,17 @@ class World:
         pinned: bool = False,
         label: str = "",
         color: str = "yellow",
-    ) -> Particle:
-        return self.add(
-            Particle(
-                as_position(position),
-                velocity=velocity,
-                mass=gram(mass),
-                pinned=pinned,
-                label=label or f"P{len(self.particles)}",
-                color=color,
-            )
+    ) -> ParticleSprite:
+        particle = ParticleSprite(
+            as_position(position),
+            velocity=velocity,
+            mass=gram(mass),
+            pinned=pinned,
+            label=label or f"P{len(self.particles)}",
+            color=color,
         )
+        self.add(particle)
+        return particle
 
     def add_electro(
         self,
@@ -93,8 +92,8 @@ class World:
         pinned: bool = False,
         label: str = "",
         color: str = "yellow",
-    ) -> ElectroParticle:
-        particle = ElectroParticle(
+    ) -> ElectroParticleSprite:
+        particle = ElectroParticleSprite(
             as_position(position),
             velocity=velocity,
             mass=gram(mass),
@@ -106,7 +105,7 @@ class World:
         self.add(particle)
         return particle
 
-    def remove(self, particle: Particle) -> None:
+    def remove(self, particle: ScreenSprite) -> None:
         """Detach and :meth:`~pygame.sprite.Sprite.kill` a particle."""
         particle.kill()
         particle.detach_world()
@@ -116,7 +115,7 @@ class World:
         for particle in list(self.particles):
             # kill() first (group may touch .rect); then drop the world weakref.
             particle.kill()
-            if isinstance(particle, Particle):
+            if isinstance(particle, ScreenSprite):
                 particle.detach_world()
         self.particles.empty()
 

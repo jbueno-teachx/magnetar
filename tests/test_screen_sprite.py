@@ -7,7 +7,7 @@ import pygame
 
 from magnetar.app import MagnetarApp, PARTICLE_RADIUS_PX
 from magnetar.assets import ParticleImageBank
-from magnetar.particles import ScreenSprite
+from magnetar.particles import Particle, ScreenSprite
 
 
 def test_group_draw_uses_image_and_rect() -> None:
@@ -21,6 +21,7 @@ def test_group_draw_uses_image_and_rect() -> None:
 
         p = next(iter(app.world.particles))
         assert isinstance(p, ScreenSprite)
+        assert isinstance(p, Particle)
         img = p.image
         r = p.rect
         assert isinstance(img, pygame.Surface)

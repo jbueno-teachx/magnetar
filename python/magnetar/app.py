@@ -18,7 +18,6 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame
 
 from magnetar.assets import DEFAULT_HUD_FONT_SIZE, hud_font_path
-from magnetar.particles import ElectroParticle, Particle
 from magnetar.prompt import InteractivePrompt
 from magnetar.units import coulomb, gram, meters, second
 from magnetar.view3d import IDENTITY_MAT3, ViewCamera
@@ -107,7 +106,7 @@ class MagnetarApp:
     def __init__(self, world_factory: WorldFactory = create_world) -> None:
         self.world_factory = world_factory
         self.world: World = world_factory()
-        # World keeps the app via a per-instance ContextVar (Particle → World → App).
+        # World keeps the app via a per-instance ContextVar (ScreenSprite → World → App).
         self.world.bind_app(self)
         self.prompt = InteractivePrompt(self.world)
 

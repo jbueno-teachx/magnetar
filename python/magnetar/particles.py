@@ -1,5 +1,12 @@
 # SPDX-License-Identifier: CC0-1.0
-"""Particle types for the magnetar simulation."""
+"""Particle types for the magnetar simulation.
+
+Physics types (:class:`Particle`, :class:`ElectroParticle`) carry dynamics and
+charge only. Display types mix those with :class:`ScreenSprite` (pygame) so a
+world can project and blit them.
+"""
+
+from __future__ import annotations
 
 import os
 import weakref
@@ -52,15 +59,145 @@ def _normalize_color(color: str) -> str:
     return name
 
 
-class ScreenSprite(pygame.sprite.Sprite):
-    """Intermediate sprite layer: ``image`` + ``rect`` for ``Group.draw``.
+# ---------------------------------------------------------------------------
+# Physics (no pygame / display knowledge)
+# ---------------------------------------------------------------------------
 
-    ``image`` is loaded via :class:`~magnetar.assets.ParticleImageBank` (not App).
-    ``rect`` still needs World→App→view for 3D projection.
+
+class Particle:
+    """A particle in continuous 3D space: mass, kinematics, pinning.
+
+    Knows nothing about rendering, sprite groups, or screen projection.
     """
 
+    def __init__(
+        self,
+        position: Position | tuple[float, float, float],
+        velocity: Velocity3 = ZERO_VELOCITY,
+        mass: Gram | float = DEFAULT_MASS,
+        pinned: bool = False,
+        label: str = "",
+    ) -> None:
+        self.position = as_position(position)
+        self.mass = gram(mass)
+        self.label = label
+        self._pinned = bool(pinned)
+        self._velocity = ZERO_VELOCITY if self._pinned else _as_velocity(velocity)
+
+    @property
+    def pinned(self) -> bool:
+        return self._pinned
+
+    @pinned.setter
+    def pinned(self, value: bool) -> None:
+        self._pinned = bool(value)
+        if self._pinned:
+            self._velocity = ZERO_VELOCITY
+
+    @property
+    def velocity(self) -> Velocity3:
+        return self._velocity
+
+    @velocity.setter
+    def velocity(self, value: Velocity3 | Tuple[float, float, float]) -> None:
+        if self._pinned:
+            raise ValueError("cannot change velocity of a pinned particle")
+        self._velocity = _as_velocity(value)
+
+    def integrate(self, dt: Second | float) -> None:
+        if self._pinned:
+            return
+        dt_s = float(second(dt))
+        if dt_s == 0.0:
+            return
+        x, y, z = self.position
+        vx, vy, vz = self._velocity
+        self.position = as_position(
+            (float(x) + vx * dt_s, float(y) + vy * dt_s, float(z) + vz * dt_s)
+        )
+
+    @property
+    def x(self) -> Meter:
+        return self.position[0]
+
+    @property
+    def y(self) -> Meter:
+        return self.position[1]
+
+    @property
+    def z(self) -> Meter:
+        return self.position[2]
+
+
+class ElectroParticle(Particle):
+    """Charged particle (physics only). ``charge`` is set at construction."""
+
+    def __init__(
+        self,
+        position: Position | tuple[float, float, float],
+        velocity: Velocity3 = ZERO_VELOCITY,
+        mass: Gram | float = DEFAULT_MASS,
+        pinned: bool = False,
+        charge: Coulomb | float = DEFAULT_CHARGE,
+        label: str = "",
+    ) -> None:
+        super().__init__(
+            position,
+            velocity=velocity,
+            mass=mass,
+            pinned=pinned,
+            label=label,
+        )
+        self.charge = coulomb(charge)
+
+
+# ---------------------------------------------------------------------------
+# Display mixin + renderable subclasses
+# ---------------------------------------------------------------------------
+
+
+class ScreenSprite(pygame.sprite.Sprite):
+    """pygame Sprite mixin: world link, color/images, ``image`` + ``rect``.
+
+    ``image`` is loaded via :class:`~magnetar.assets.ParticleImageBank` (not App).
+    ``rect`` needs World→App→view for 3D projection. Co-inherited types supply
+    ``position`` (from :class:`Particle`).
+    """
+
+    color: str
+    sprite_frame: int
+    sprite_tag: str | None
+    _world_ref: Optional[weakref.ReferenceType[World]]
+
+    def __init__(
+        self,
+        *,
+        color: str = DEFAULT_PARTICLE_COLOR,
+        world: World | None = None,
+        sprite_frame: int = 0,
+        sprite_tag: str | None = None,
+    ) -> None:
+        super().__init__()
+        self.color = _normalize_color(color)
+        self._world_ref = weakref.ref(world) if world is not None else None
+        self.sprite_frame = int(sprite_frame)
+        self.sprite_tag = sprite_tag
+
+    @property
+    def world(self) -> World | None:
+        ref = self._world_ref
+        if ref is None:
+            return None
+        return ref()
+
+    def attach_world(self, world: World) -> None:
+        self._world_ref = weakref.ref(world)
+
+    def detach_world(self) -> None:
+        self._world_ref = None
+
     def _require_app(self):
-        world = getattr(self, "world", None)
+        world = self.world
         if world is None:
             raise RuntimeError("sprite is not attached to a world")
         app = world.app
@@ -91,9 +228,9 @@ class ScreenSprite(pygame.sprite.Sprite):
         (default 5 ticks per frame change), plus optional ``sprite_frame`` base
         offset, wrapped with ``frame % bank.frame_count(color)``.
         """
-        color = getattr(self, "color", DEFAULT_PARTICLE_COLOR)
-        tag = getattr(self, "sprite_tag", None)
-        base = int(getattr(self, "sprite_frame", 0) or 0)
+        color = self.color
+        tag = self.sprite_tag
+        base = int(self.sprite_frame or 0)
         try:
             app = self._require_app()
             radius = int(getattr(app, "particle_radius_px", DEFAULT_SCREEN_RADIUS_PX))
@@ -143,10 +280,10 @@ class ScreenSprite(pygame.sprite.Sprite):
         return projected[2]
 
 
-class Particle(ScreenSprite):
-    """A particle in 3D space (also a pygame Sprite for group membership).
+class ParticleSprite(Particle, ScreenSprite):
+    """Renderable particle: physics (:class:`Particle`) + pygame display.
 
-    ``color`` selects the packaged particle image variant (e.g. ``\"yellow\"``).
+    Multiple inheritance of :class:`Particle` and :class:`ScreenSprite`.
     """
 
     def __init__(
@@ -162,79 +299,25 @@ class Particle(ScreenSprite):
         sprite_frame: int = 0,
         sprite_tag: str | None = None,
     ) -> None:
-        super().__init__()
-        self.position = as_position(position)
-        self.mass = gram(mass)
-        self.label = label
-        self.color = _normalize_color(color)
-        self._pinned = bool(pinned)
-        self._velocity = ZERO_VELOCITY if self._pinned else _as_velocity(velocity)
-        self._world_ref: Optional[weakref.ReferenceType[World]] = (
-            weakref.ref(world) if world is not None else None
+        Particle.__init__(
+            self,
+            position,
+            velocity=velocity,
+            mass=mass,
+            pinned=pinned,
+            label=label,
         )
-        self.sprite_frame = int(sprite_frame)
-        self.sprite_tag = sprite_tag
-
-    @property
-    def world(self) -> World | None:
-        ref = self._world_ref
-        if ref is None:
-            return None
-        return ref()
-
-    def attach_world(self, world: World) -> None:
-        self._world_ref = weakref.ref(world)
-
-    def detach_world(self) -> None:
-        self._world_ref = None
-
-    @property
-    def pinned(self) -> bool:
-        return self._pinned
-
-    @pinned.setter
-    def pinned(self, value: bool) -> None:
-        self._pinned = bool(value)
-        if self._pinned:
-            self._velocity = ZERO_VELOCITY
-
-    @property
-    def velocity(self) -> Velocity3:
-        return self._velocity
-
-    @velocity.setter
-    def velocity(self, value: Velocity3 | Tuple[float, float, float]) -> None:
-        if self._pinned:
-            raise ValueError("cannot change velocity of a pinned particle")
-        self._velocity = _as_velocity(value)
-
-    def integrate(self, dt: Second | float) -> None:
-        if self._pinned:
-            return
-        dt_s = float(second(dt))
-        if dt_s == 0.0:
-            return
-        x, y, z = self.position
-        vx, vy, vz = self._velocity
-        self.position = as_position(
-            (float(x) + vx * dt_s, float(y) + vy * dt_s, float(z) + vz * dt_s)
+        ScreenSprite.__init__(
+            self,
+            color=color,
+            world=world,
+            sprite_frame=sprite_frame,
+            sprite_tag=sprite_tag,
         )
 
-    @property
-    def x(self) -> Meter:
-        return self.position[0]
 
-    @property
-    def y(self) -> Meter:
-        return self.position[1]
-
-    @property
-    def z(self) -> Meter:
-        return self.position[2]
-
-
-class ElectroParticle(Particle):
-    """Charged particle. ``charge`` and ``color`` are set at construction."""
+class ElectroParticleSprite(ElectroParticle, ScreenSprite):
+    """Renderable charged particle: :class:`ElectroParticle` + pygame display."""
 
     def __init__(
         self,
@@ -250,15 +333,19 @@ class ElectroParticle(Particle):
         sprite_frame: int = 0,
         sprite_tag: str | None = None,
     ) -> None:
-        super().__init__(
+        ElectroParticle.__init__(
+            self,
             position,
             velocity=velocity,
             mass=mass,
             pinned=pinned,
+            charge=charge,
             label=label,
+        )
+        ScreenSprite.__init__(
+            self,
             color=color,
             world=world,
             sprite_frame=sprite_frame,
             sprite_tag=sprite_tag,
         )
-        self.charge = coulomb(charge)

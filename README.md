@@ -42,7 +42,7 @@ python/magnetar/
   __main__.py     # python -m magnetar
   app.py          # view constants + pygame main loop
   world.py        # 3D particle space
-  particles.py    # particle types
+  particles.py    # Particle / ElectroParticle (physics) + *Sprite display types
   prompt.py       # interactive stdin commands
 ```
 
