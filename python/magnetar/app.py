@@ -18,7 +18,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame
 
 from magnetar.assets import DEFAULT_HUD_FONT_SIZE, hud_font_path
-from magnetar.prompt import InteractivePrompt
+from magnetar.prompt import Prompt
 from magnetar.units import coulomb, gram, meters, second
 from magnetar.view3d import ViewCamera
 from magnetar import widgets as widgets_pkg
@@ -132,7 +132,7 @@ class MagnetarApp:
         self.world: World = world_factory()
         # World keeps the app via a per-instance ContextVar (ScreenSprite → World → App).
         self.world.bind_app(self)
-        self.prompt = InteractivePrompt(self.world)
+        self.prompt = Prompt(self.world)
 
         # 3D view / orbit / projection (associated object, not mixed into App).
         self.view = ViewCamera(
@@ -149,6 +149,9 @@ class MagnetarApp:
         self.font: pygame.font.Font | None = None
         self.running: bool = False
         self.tick: int = 0  # animation clock; ScreenSprite wraps frames with this
+        # Transient HUD line (e.g. after prompt submit); cleared after tick deadline.
+        self._hud_notice: str | None = None
+        self._hud_notice_until_tick: int = 0
 
         # In-window UI (registry filled after pygame init when surfaces exist).
         self.widgets = WidgetRegistry()
@@ -166,7 +169,7 @@ class MagnetarApp:
             self._quit()
 
     def _init(self) -> None:
-        """Bring up pygame, widgets (clipboard), display, UI, and stdin prompt."""
+        """Bring up pygame, widgets, display, and UI."""
         self._init_pygame()
         widgets_pkg.init()
         pygame.display.set_caption(WINDOW_TITLE)
@@ -176,11 +179,9 @@ class MagnetarApp:
         with hud_font_path() as font_file:
             self.font = pygame.font.Font(str(font_file), DEFAULT_HUD_FONT_SIZE)
         self._build_ui()
-        self.prompt.start()
 
     def _quit(self) -> None:
-        """Tear down prompt, widgets (clipboard), and pygame."""
-        self.prompt.stop()
+        """Tear down widgets (history/clipboard) and pygame."""
         widgets_pkg.quit()
         self._shutdown_pygame()
 
@@ -200,7 +201,7 @@ class MagnetarApp:
         return 0
 
     def events(self) -> None:
-        """Poll pygame events, widget registry, and the interactive prompt."""
+        """Poll pygame events and the widget registry (in-window command line)."""
         screen_size = (
             self.screen.get_size() if self.screen is not None else (VIEW_WIDTH, VIEW_HEIGHT)
         )
@@ -231,19 +232,21 @@ class MagnetarApp:
                 self.running = False
                 continue
 
-        if self.prompt.poll() is False:
-            self.running = False
-
     def _on_widget_submit(self, event: pygame.event.Event) -> None:
-        """Handle :data:`~magnetar.widgets.WIDGET_SUBMIT` (not wired to REPL yet)."""
+        """Run a command line from the in-window entry; replies go to stdout."""
         text = getattr(event, "text", None)
         if text is None and getattr(event, "widget", None) is not None:
             text = getattr(event.widget, "text", "")
         line = "" if text is None else str(text)
-        # Temporary observability for the in-window line; REPL wiring comes later.
-        print(line, flush=True)
         if self._prompt_entry is not None and getattr(event, "widget", None) is self._prompt_entry:
             self._prompt_entry.clear(notify=False)
+            if line.strip():
+                self._hud_notice = "check stdout for output"
+                self._hud_notice_until_tick = self.tick + int(TARGET_FPS * 2.5)
+            if self.prompt.execute(line):
+                self.running = False
+            return
+        # Other submit-capable widgets: ignore for now.
 
     # -- view API proxies (delegate to self.view) ------------------------------
 
@@ -341,7 +344,7 @@ class MagnetarApp:
         assert self.screen is not None and self.font is not None
         yaw, pitch, roll = self.world_rotation
         lines = [
-            f"magnetar  t={float(self.world.time):.2f}s  n={len(self.world)}",
+            f"magnetar  t={float(self.world.time):.1f}s  n={len(self.world)}",
             (
                 f"view  yaw={math.degrees(yaw):.1f}°  "
                 f"pitch={math.degrees(pitch):+.1f}°  "
@@ -349,6 +352,10 @@ class MagnetarApp:
             ),
             "orbit: drag / click sides; center resets  |  click bottom line to type  |  Esc/q quit",
         ]
+        if self._hud_notice and self.tick <= self._hud_notice_until_tick:
+            lines.append(self._hud_notice)
+        elif self._hud_notice and self.tick > self._hud_notice_until_tick:
+            self._hud_notice = None
         y = 8
         for line in lines:
             text = self.font.render(line, True, HUD_COLOR)
@@ -401,7 +408,7 @@ class MagnetarApp:
             name="prompt",
             anchor=PROMPT_WIDGET_ANCHOR,
             font=self.font,
-            placeholder="magnetar> ",
+            placeholder="",
             border=THEME_COLOR,
             border_focused=(0, 255, 200),
             text_color=THEME_COLOR,
