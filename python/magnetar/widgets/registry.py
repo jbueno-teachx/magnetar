@@ -57,7 +57,8 @@ class WidgetRegistry:
     def focus(self) -> Widget | None:
         return self._focus
 
-    def set_focus(self, widget: Widget | None) -> None:
+    @focus.setter
+    def focus(self, widget: Widget | None) -> None:
         """Update keyboard focus; blur a previous :class:`TextEntry` if needed."""
         if widget is self._focus:
             return
@@ -69,7 +70,7 @@ class WidgetRegistry:
             widget.focus()
 
     def clear_focus(self) -> None:
-        self.set_focus(None)
+        self.focus = None
 
     @property
     def interest_mask(self) -> EventInterest:
@@ -128,7 +129,7 @@ class WidgetRegistry:
             if widget.interest & EventInterest.DRAG:
                 self._capture = widget
             if widget.interest & EventInterest.KEY:
-                self.set_focus(widget)
+                self.focus = widget
             elif self._focus is not None and widget is not self._focus:
                 self.clear_focus()
             pe = WidgetPointerEvent(kind="down", pos=pos, button=1, buttons=1)

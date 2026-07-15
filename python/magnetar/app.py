@@ -515,7 +515,7 @@ class MagnetarApp:
         )
         self.widgets.add(self._prompt_entry)
         # Ready for typing without an extra click during this experiment.
-        self.widgets.set_focus(self._prompt_entry)
+        self.widgets.focus = self._prompt_entry
 
     def _on_orbit_click(self, zone: str) -> None:
         """Discrete orbit step from the *current* orientation, or reset on center.

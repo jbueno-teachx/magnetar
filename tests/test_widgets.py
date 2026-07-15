@@ -202,7 +202,7 @@ def test_text_entry_typing_arrows_backspace_submit() -> None:
         reg = WidgetRegistry()
         entry = TextEntry(0, 0, 100, 20, font=font, name="line")
         reg.add(entry)
-        reg.set_focus(entry)
+        reg.focus = entry
         size = (400, 40)
 
         def key(k: int, uni: str = "") -> pygame.event.Event:
@@ -244,7 +244,7 @@ def test_text_entry_length_limited_to_widget_width() -> None:
         entry = TextEntry(0, 0, 10, 50, font=font, padding_px=2)
         reg = WidgetRegistry()
         reg.add(entry)
-        reg.set_focus(entry)
+        reg.focus = entry
         size = (200, 40)
         for _ in range(40):
             reg.dispatch(
@@ -321,7 +321,7 @@ def test_text_entry_autorepeat_char_via_repeated_keydown() -> None:
         reg = WidgetRegistry()
         entry = TextEntry(0, 0, 100, 30, font=font)
         reg.add(entry)
-        reg.set_focus(entry)
+        reg.focus = entry
         size = (800, 60)
         for _ in range(8):
             assert reg.dispatch(_keydown(pygame.K_x, "x"), size)
@@ -340,7 +340,7 @@ def test_text_entry_autorepeat_backspace_and_arrows() -> None:
         entry = TextEntry(0, 0, 100, 30, font=font, text="abcdef")
         entry.cursor = 6
         reg.add(entry)
-        reg.set_focus(entry)
+        reg.focus = entry
         size = (800, 60)
 
         for _ in range(3):
@@ -478,7 +478,7 @@ def test_text_entry_escape_blurs_and_registry_clears_focus() -> None:
         reg = WidgetRegistry()
         entry = TextEntry(0, 0, 50, 20, font=pygame.font.Font(None, 20))
         reg.add(entry)
-        reg.set_focus(entry)
+        reg.focus = entry
         assert entry.focused
         assert reg.focus is entry
         assert reg.dispatch(_keydown(pygame.K_ESCAPE), (400, 40))
