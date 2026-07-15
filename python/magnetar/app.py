@@ -26,6 +26,7 @@ from magnetar.widgets import (
     Anchor,
     DragImageButton,
     HistoryTextEntry,
+    TextPanel,
     WIDGET_SUBMIT,
     WidgetRegistry,
     make_curved_arrows_icon,
@@ -62,6 +63,13 @@ NEUTRAL_COLOR = (160, 160, 160)
 AXIS_COLOR = (191, 191, 191)  # 75% gray — axes and axis labels
 HUD_COLOR = THEME_COLOR
 
+# Live status HUD (top-left TextPanel) — tick / particle / view summary only.
+HUD_PANEL_X_PCT = 1.0
+HUD_PANEL_Y_PCT = 1.0
+HUD_PANEL_W_PCT = 52.0
+HUD_PANEL_H_PCT = 10.0
+HUD_PANEL_ANCHOR = Anchor(h="left", v="top")
+
 # Orbit control (bottom-right): click = 10°, drag = continuous rotate about origin.
 ROTATE_CLICK_DEGREES = 10.0
 ROTATE_DRAG_DEGREES_PER_PIXEL = 0.35
@@ -81,6 +89,15 @@ PROMPT_WIDGET_Y_PCT = ROTATE_WIDGET_Y_PCT  # shared bottom with orbit button
 PROMPT_WIDGET_ANCHOR = Anchor(h="left", v="bottom")
 # Stretch almost to the orbit control's left edge (orbit is right-anchored).
 PROMPT_WIDGET_W_PCT = (ROTATE_WIDGET_X_PCT - ROTATE_WIDGET_W_PCT) - PROMPT_WIDGET_X_PCT - 1.0
+
+# Prompt output panel — sits just above the command line, same width/left edge.
+PROMPT_OUT_H_PCT = 16.0
+PROMPT_OUT_X_PCT = PROMPT_WIDGET_X_PCT
+PROMPT_OUT_W_PCT = PROMPT_WIDGET_W_PCT
+# Bottom edge of output panel = top of prompt (shared horizontal band).
+PROMPT_OUT_Y_PCT = PROMPT_WIDGET_Y_PCT - PROMPT_WIDGET_H_PCT
+PROMPT_OUT_ANCHOR = Anchor(h="left", v="bottom")
+PROMPT_OUT_MAX_LINES = 80
 
 # pygame KEYDOWN auto-repeat while a key is held (TextEntry, etc.).
 # delay = ms before first repeat; interval = ms between subsequent repeats.
@@ -149,14 +166,13 @@ class MagnetarApp:
         self.font: pygame.font.Font | None = None
         self.running: bool = False
         self.tick: int = 0  # animation clock; ScreenSprite wraps frames with this
-        # Transient HUD line (e.g. after prompt submit); cleared after tick deadline.
-        self._hud_notice: str | None = None
-        self._hud_notice_until_tick: int = 0
 
         # In-window UI (registry filled after pygame init when surfaces exist).
         self.widgets = WidgetRegistry()
         self._orbit_button: DragImageButton | None = None
         self._prompt_entry: HistoryTextEntry | None = None
+        self._hud_panel: TextPanel | None = None
+        self._prompt_out: TextPanel | None = None
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -233,20 +249,34 @@ class MagnetarApp:
                 continue
 
     def _on_widget_submit(self, event: pygame.event.Event) -> None:
-        """Run a command line from the in-window entry; replies go to stdout."""
+        """Run a command line from the in-window entry; replies go to prompt-out + stdout."""
         text = getattr(event, "text", None)
         if text is None and getattr(event, "widget", None) is not None:
             text = getattr(event.widget, "text", "")
         line = "" if text is None else str(text)
         if self._prompt_entry is not None and getattr(event, "widget", None) is self._prompt_entry:
             self._prompt_entry.clear(notify=False)
-            if line.strip():
-                self._hud_notice = "check stdout for output"
-                self._hud_notice_until_tick = self.tick + int(TARGET_FPS * 2.5)
             if self.prompt.execute(line):
                 self.running = False
+            msg = self.prompt.last_message
+            if msg:
+                # Echo the command then its reply into the prompt-output panel.
+                if line.strip():
+                    self._append_prompt_output(f"> {line.strip()}")
+                self._append_prompt_output(msg)
             return
         # Other submit-capable widgets: ignore for now.
+
+    def _append_prompt_output(self, text: str) -> None:
+        """Append text to the prompt-output panel and ensure it is visible.
+
+        Closing the panel (X) only hides it; the next non-empty command reply
+        reopens it automatically.
+        """
+        if self._prompt_out is None:
+            return
+        self._prompt_out.append_text(text)
+        self._prompt_out.show()
 
     # -- view API proxies (delegate to self.view) ------------------------------
 
@@ -341,26 +371,24 @@ class MagnetarApp:
         )
 
     def draw_hud(self) -> None:
-        assert self.screen is not None and self.font is not None
+        """Refresh the live status :class:`~magnetar.widgets.TextPanel` (tick / n / view).
+
+        Prompt command replies go to :attr:`_prompt_out`, not this panel.
+        """
+        if self._hud_panel is None:
+            return
         yaw, pitch, roll = self.world_rotation
-        lines = [
-            f"magnetar  t={float(self.world.time):.1f}s  n={len(self.world)}",
-            (
-                f"view  yaw={math.degrees(yaw):.1f}°  "
-                f"pitch={math.degrees(pitch):+.1f}°  "
-                f"roll={math.degrees(roll):+.1f}°"
-            ),
-            "orbit: drag / click sides; center resets  |  click bottom line to type  |  Esc/q quit",
-        ]
-        if self._hud_notice and self.tick <= self._hud_notice_until_tick:
-            lines.append(self._hud_notice)
-        elif self._hud_notice and self.tick > self._hud_notice_until_tick:
-            self._hud_notice = None
-        y = 8
-        for line in lines:
-            text = self.font.render(line, True, HUD_COLOR)
-            self.screen.blit(text, (10, y))
-            y += text.get_height() + 2
+        self._hud_panel.set_lines(
+            [
+                f"magnetar  t={float(self.world.time):.1f}s  n={len(self.world)}",
+                (
+                    f"view  yaw={math.degrees(yaw):.1f}°  "
+                    f"pitch={math.degrees(pitch):+.1f}°  "
+                    f"roll={math.degrees(roll):+.1f}°"
+                ),
+                "orbit: drag/click sides; center resets  |  type below  |  Esc/q quit",
+            ]
+        )
 
     def render_frame(self) -> None:
         assert self.screen is not None
@@ -399,6 +427,43 @@ class MagnetarApp:
             on_drag=self._on_orbit_drag,
         )
         self.widgets.add(self._orbit_button)
+
+        self._hud_panel = TextPanel(
+            HUD_PANEL_X_PCT,
+            HUD_PANEL_Y_PCT,
+            HUD_PANEL_W_PCT,
+            HUD_PANEL_H_PCT,
+            anchor=HUD_PANEL_ANCHOR,
+            name="hud",
+            font=self.font,
+            border=THEME_COLOR,
+            text_color=HUD_COLOR,
+            fill=(8, 16, 20, 180),
+            scroll_to_end=False,
+            closable=False,
+        )
+        self.widgets.add(self._hud_panel)
+
+        # Prompt output log (above the command line). Closed via X; reopens on output.
+        self._prompt_out = TextPanel(
+            PROMPT_OUT_X_PCT,
+            PROMPT_OUT_Y_PCT,
+            PROMPT_OUT_W_PCT,
+            PROMPT_OUT_H_PCT,
+            anchor=PROMPT_OUT_ANCHOR,
+            name="prompt_out",
+            font=self.font,
+            border=THEME_COLOR,
+            text_color=HUD_COLOR,
+            fill=(8, 16, 20, 200),
+            scroll_to_end=True,
+            max_lines=PROMPT_OUT_MAX_LINES,
+            closable=True,
+            close_color=THEME_COLOR,
+        )
+        # Start hidden until the first command produces text.
+        self._prompt_out.hide()
+        self.widgets.add(self._prompt_out)
 
         self._prompt_entry = HistoryTextEntry(
             PROMPT_WIDGET_X_PCT,

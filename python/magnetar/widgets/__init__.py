@@ -32,6 +32,7 @@ from magnetar.widgets.history_textentry import HistoryTextEntry
 from magnetar.widgets.keyevent import KeyEvent
 from magnetar.widgets.registry import WidgetRegistry
 from magnetar.widgets.textentry import TextEntry
+from magnetar.widgets.textpanel import TextPanel
 
 __all__ = [
     "Anchor",
@@ -47,6 +48,7 @@ __all__ = [
     "Point",
     "ScreenSize",
     "TextEntry",
+    "TextPanel",
     "WIDGET_BLUR",
     "WIDGET_CHANGED",
     "WIDGET_FOCUS",

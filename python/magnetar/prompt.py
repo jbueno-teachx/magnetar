@@ -41,6 +41,8 @@ class Prompt:
 
     def __init__(self, world: World) -> None:
         self.world = world
+        #: Last message produced by :meth:`execute` (also emitted to stdout).
+        self.last_message: str | None = None
         self._handlers: dict[str, Callable[[PromptCommand], str | None]] = {
             "help": self._cmd_help,
             "?": self._cmd_help,
@@ -54,20 +56,27 @@ class Prompt:
         }
 
     def execute(self, line: str) -> bool:
-        """Run one line. Return True if the application should quit."""
+        """Run one line. Return True if the application should quit.
+
+        Sets :attr:`last_message` to the reply string (or ``None`` if empty /
+        no-op) so UIs can mirror stdout into a text panel.
+        """
+        self.last_message = None
         line = str(line).strip()
         if not line:
             return False
         try:
             tokens = shlex.split(line)
         except ValueError as exc:
-            self._emit(f"parse error: {exc}")
+            self.last_message = f"parse error: {exc}"
+            self._emit(self.last_message)
             return False
         if not tokens:
             return False
         cmd = PromptCommand(raw=line, tokens=tokens)
         reply = self._dispatch(cmd)
         if reply is not None and reply != "":
+            self.last_message = reply
             self._emit(reply)
         return cmd.name in {"quit", "exit", "q"}
 
