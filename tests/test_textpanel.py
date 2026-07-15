@@ -129,6 +129,9 @@ def test_app_hud_status_only_and_prompt_out() -> None:
     pygame.font.init()
     try:
         app.font = pygame.font.Font(None, 18)
+        from magnetar.widgets import get_theme
+
+        get_theme().font = app.font
         app._build_ui()
         assert app._hud_panel is not None
         assert app._prompt_out is not None

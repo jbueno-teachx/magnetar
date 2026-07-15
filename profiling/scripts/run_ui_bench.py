@@ -44,6 +44,9 @@ def main() -> int:
         app = MagnetarApp()
         with hud_font_path() as font_file:
             app.font = pygame.font.Font(str(font_file), DEFAULT_HUD_FONT_SIZE)
+        from magnetar.widgets import get_theme
+
+        get_theme().font = app.font
         app.screen = screen
         app._build_ui()
         assert app._hud_panel is not None and app._prompt_out is not None

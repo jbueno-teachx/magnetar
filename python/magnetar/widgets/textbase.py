@@ -16,6 +16,7 @@ from magnetar.widgets.base import (
     EventInterest,
     Widget,
 )
+from magnetar.widgets.theme import theme_value
 
 
 class TextWidget(Widget):
@@ -23,13 +24,12 @@ class TextWidget(Widget):
 
     Subclasses keep a canonical content snapshot (string or lines). Mutators
     should call :meth:`commit_text` / :meth:`commit_lines` so that assigning
-    *equal* content is a no-op and does **not** set the dirty flag.
+    *equal* content is a no-op and does **not** set ``_dirty``.
 
-    ``_dirty`` means rasterized text may be stale (for future surface / glyph
-    caches). The screen is still fully cleared each frame by the app, so
-    :meth:`draw` still runs every frame; ``_dirty`` only gates *rebuilding*
-    cached glyphs when a cache exists. Use the attribute directly inside this
-    package — no getter/setter wrappers.
+    Style attributes (``color``, ``background``, ``border``, ``padding``,
+    ``font``) use CSS-inspired names. ``None`` means “take from the active
+    theme” via :func:`~magnetar.widgets.theme.theme_value` at draw/layout time
+    so a theme object can later animate with ``@property``.
     """
 
     def __init__(
@@ -46,10 +46,14 @@ class TextWidget(Widget):
         visible: bool = True,
         enabled: bool = True,
         font: pygame.font.Font | None = None,
-        fill: tuple[int, int, int, int] | None = None,
+        color: tuple[int, int, int] | None = None,
+        background: tuple[int, int, int, int] | None = None,
         border: tuple[int, int, int] | None = None,
-        text_color: tuple[int, int, int] = (0, 255, 255),
-        padding_px: int = 8,
+        padding: int | None = None,
+        # Back-compat aliases (prefer CSS names above).
+        text_color: tuple[int, int, int] | None = None,
+        fill: tuple[int, int, int, int] | None = None,
+        padding_px: int | None = None,
     ) -> None:
         super().__init__(
             x_pct,
@@ -63,16 +67,44 @@ class TextWidget(Widget):
             visible=visible,
             enabled=enabled,
         )
+        # Per-widget overrides; None → active theme.
         self.font = font
-        self.fill = fill
+        self.color = color if color is not None else text_color
+        self.background = background if background is not None else fill
         self.border = border
-        self.text_color = text_color
-        self.padding_px = int(padding_px)
-        # Paint/content invalidation for glyph/surface caches (widgets package only).
+        self.padding = padding if padding is not None else padding_px
         self._dirty: bool = True
         # Canonical content fingerprint for equality short-circuit.
         # TextEntry: str; TextPanel: tuple[str, ...].
         self._content_key: str | tuple[str, ...] = ""
+
+    # -- theme resolution (no getters — call these where values are needed) ---
+
+    def theme_color(self) -> tuple[int, int, int]:
+        return theme_value("color", self.color, (0, 255, 255))
+
+    def theme_background(self, *, key: str = "background") -> tuple[int, int, int, int] | None:
+        """Resolve panel fill. ``key`` selects theme attr when override is None."""
+        if self.background is not None:
+            return self.background
+        return theme_value(key, None, None)
+
+    def theme_border(self) -> tuple[int, int, int] | None:
+        return theme_value("border", self.border, None)
+
+    def theme_padding(self) -> int:
+        return int(theme_value("padding", self.padding, 8))
+
+    def theme_font(self) -> pygame.font.Font | None:
+        if self.font is not None:
+            return self.font
+        return theme_value("font", None, None)
+
+    def theme_border_width(self) -> int:
+        return int(theme_value("border_width", None, 1))
+
+    def theme_border_radius(self) -> int:
+        return int(theme_value("border_radius", None, 3))
 
     def set_font(self, font: pygame.font.Font | None) -> None:
         if font is self.font:
@@ -102,7 +134,6 @@ class TextWidget(Widget):
         """Empty content. Return True if something was cleared."""
         if self._content_key == "" or self._content_key == ():
             return False
-        # Prefer empty string for single-line widgets; panels use empty tuple.
         if isinstance(self._content_key, tuple):
             self._content_key = ()
         else:

@@ -19,6 +19,7 @@ from magnetar.widgets.base import (
     Widget,
     WidgetPointerEvent,
 )
+from magnetar.widgets.theme import theme_value
 
 
 class Button(Widget):
@@ -36,8 +37,10 @@ class Button(Widget):
         name: str = "",
         interest: EventInterest = EventInterest.CLICK,
         label: str = "",
-        fill: tuple[int, int, int, int] | None = (20, 40, 40, 180),
-        border: tuple[int, int, int] = (0, 255, 255),
+        color: tuple[int, int, int] | None = None,
+        background: tuple[int, int, int, int] | None = None,
+        border: tuple[int, int, int] | None = None,
+        fill: tuple[int, int, int, int] | None = None,  # alias for background
     ) -> None:
         super().__init__(
             x_pct,
@@ -50,19 +53,27 @@ class Button(Widget):
             interest=interest,
         )
         self.label = label
-        self.fill = fill
+        self.background = background if background is not None else fill
         self.border = border
+        self.color = color
         self._pressed = False
 
     def draw(self, surface: pygame.Surface) -> None:
         if not self.visible:
             return
         rect = self.screen_rect(surface.get_size())
-        if self.fill is not None:
+        if self.background is not None:
+            fill = self.background
+        else:
+            fill = theme_value("background_button", None, None)
+        if fill is not None:
             overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
-            overlay.fill(self.fill)
+            overlay.fill(fill)
             surface.blit(overlay, rect.topleft)
-        pygame.draw.rect(surface, self.border, rect, width=1, border_radius=4)
+        border = theme_value("border", self.border, (0, 255, 255))
+        width = int(theme_value("border_width", None, 1))
+        radius = int(theme_value("border_radius", None, 3))
+        pygame.draw.rect(surface, border, rect, width=width, border_radius=radius)
 
     def on_event(self, event: WidgetPointerEvent, screen_size: ScreenSize) -> bool:
         if event.kind == "down" and event.button == 1:
@@ -119,13 +130,20 @@ class DragImageButton(Button):
         if not self.visible:
             return
         rect = self.screen_rect(surface.get_size())
-        if self.fill is not None:
+        if self.background is not None:
+            fill = self.background
+        else:
+            fill = theme_value("background_button", None, None)
+        if fill is not None:
             overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
-            overlay.fill(self.fill)
+            overlay.fill(fill)
             surface.blit(overlay, rect.topleft)
         scaled = pygame.transform.smoothscale(self.image, rect.size)
         surface.blit(scaled, rect.topleft)
-        pygame.draw.rect(surface, self.border, rect, width=1, border_radius=4)
+        border = theme_value("border", self.border, (0, 255, 255))
+        width = int(theme_value("border_width", None, 1))
+        radius = int(theme_value("border_radius", None, 3))
+        pygame.draw.rect(surface, border, rect, width=width, border_radius=radius)
 
     @staticmethod
     def zone_at(

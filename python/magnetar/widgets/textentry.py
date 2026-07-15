@@ -24,6 +24,7 @@ from magnetar.widgets.base import (
 from magnetar.widgets.clipboard import ClipboardError, get_text, set_text
 from magnetar.widgets.keyevent import KeyEvent
 from magnetar.widgets.textbase import TextWidget
+from magnetar.widgets.theme import theme_value
 
 
 class TextEntry(TextWidget):
@@ -91,16 +92,23 @@ class TextEntry(TextWidget):
         placeholder: str = "",
         name: str = "",
         command: Command = None,
-        fill: tuple[int, int, int, int] | None = (12, 24, 28, 220),
-        border: tuple[int, int, int] = (0, 255, 255),
-        border_focused: tuple[int, int, int] = (0, 255, 200),
-        text_color: tuple[int, int, int] = (0, 255, 255),
-        placeholder_color: tuple[int, int, int] = (0, 120, 120),
-        caret_color: tuple[int, int, int] = (0, 255, 255),
+        color: tuple[int, int, int] | None = None,
+        background: tuple[int, int, int, int] | None = None,
+        border: tuple[int, int, int] | None = None,
+        border_focus: tuple[int, int, int] | None = None,
+        color_placeholder: tuple[int, int, int] | None = None,
+        color_caret: tuple[int, int, int] | None = None,
         selection_fg: tuple[int, int, int] | None = None,
         selection_bg: tuple[int, int, int] | None = None,
-        padding_px: int = 8,
+        padding: int | None = None,
         caret_blink_ms: int = 530,
+        # Back-compat aliases
+        fill: tuple[int, int, int, int] | None = None,
+        text_color: tuple[int, int, int] | None = None,
+        border_focused: tuple[int, int, int] | None = None,
+        placeholder_color: tuple[int, int, int] | None = None,
+        caret_color: tuple[int, int, int] | None = None,
+        padding_px: int | None = None,
     ) -> None:
         super().__init__(
             x_pct,
@@ -112,17 +120,19 @@ class TextEntry(TextWidget):
             name=name or "textentry",
             interest=EventInterest.CLICK | EventInterest.KEY | EventInterest.DRAG,
             font=font,
-            fill=fill,
+            color=color if color is not None else text_color,
+            background=background if background is not None else fill,
             border=border,
-            text_color=text_color,
-            padding_px=padding_px,
+            padding=padding if padding is not None else padding_px,
         )
         self.commit_text(str(text))
         self.placeholder = placeholder
-        self.border_focused = border_focused
-        self.placeholder_color = placeholder_color
-        self.caret_color = caret_color
-        # Reverse video defaults: invert text/fill for selected span.
+        self.border_focus = border_focus if border_focus is not None else border_focused
+        self.color_placeholder = (
+            color_placeholder if color_placeholder is not None else placeholder_color
+        )
+        self.color_caret = color_caret if color_caret is not None else caret_color
+        # Reverse video defaults: invert text/background for selected span.
         self.selection_fg = selection_fg
         self.selection_bg = selection_bg
         self.caret_blink_ms = int(caret_blink_ms)
@@ -215,12 +225,13 @@ class TextEntry(TextWidget):
 
     def _content_width_budget(self, screen_size: ScreenSize) -> int:
         rect = self.screen_rect(screen_size)
-        return max(0, rect.width - 2 * self.padding_px)
+        return max(0, rect.width - 2 * self.theme_padding())
 
     def _text_pixel_width(self, s: str) -> int:
-        if self.font is None:
+        font = self.theme_font()
+        if font is None:
             return len(s) * 8
-        return self.font.size(s)[0]
+        return font.size(s)[0]
 
     def _fits(self, s: str, screen_size: ScreenSize) -> bool:
         """Whether ``s`` fits the inner content width (caret drawn on top)."""
@@ -240,9 +251,10 @@ class TextEntry(TextWidget):
         """Return ``(fg, bg)`` for selected text (reverse of normal)."""
         if self.selection_fg is not None and self.selection_bg is not None:
             return self.selection_fg, self.selection_bg
-        bg = self.text_color
-        if self.fill is not None and len(self.fill) >= 3:
-            fg = (int(self.fill[0]), int(self.fill[1]), int(self.fill[2]))
+        bg = self.theme_color()
+        fill = self.theme_background(key="background_input")
+        if fill is not None and len(fill) >= 3:
+            fg = (int(fill[0]), int(fill[1]), int(fill[2]))
         else:
             fg = (0, 0, 0)
         if self.selection_fg is not None:
@@ -257,59 +269,76 @@ class TextEntry(TextWidget):
         if not self.visible:
             return
         rect = self.screen_rect(surface.get_size())
-        if self.fill is not None:
+        fill = self.theme_background(key="background_input")
+        if fill is not None:
             overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
-            overlay.fill(self.fill)
+            overlay.fill(fill)
             surface.blit(overlay, rect.topleft)
-        border = self.border_focused if self.focused else self.border
-        pygame.draw.rect(surface, border, rect, width=1, border_radius=3)
+        if self.focused:
+            border = theme_value("border_focus", self.border_focus, self.theme_border())
+        else:
+            border = self.theme_border()
+        if border is not None:
+            pygame.draw.rect(
+                surface,
+                border,
+                rect,
+                width=self.theme_border_width(),
+                border_radius=self.theme_border_radius(),
+            )
 
-        if self.font is None:
+        font = self.theme_font()
+        if font is None:
             return
 
-        inner_x = rect.x + self.padding_px
-        inner_y = rect.y + max(0, (rect.height - self.font.get_height()) // 2)
+        pad = self.theme_padding()
+        inner_x = rect.x + pad
+        inner_y = rect.y + max(0, (rect.height - font.get_height()) // 2)
         show_placeholder = (not self._text) and (not self.focused) and bool(self.placeholder)
 
         if show_placeholder:
-            label = self.font.render(self.placeholder, True, self.placeholder_color)
+            ph = theme_value("color_placeholder", self.color_placeholder, (0, 120, 120))
+            label = font.render(self.placeholder, True, ph)
             surface.blit(label, (inner_x, inner_y))
             return
 
         if self.has_selection():
-            self._draw_with_selection(surface, inner_x, inner_y)
+            self._draw_with_selection(surface, inner_x, inner_y, font)
         else:
-            self._draw_plain(surface, inner_x, inner_y)
+            self._draw_plain(surface, inner_x, inner_y, font)
         # Caret always at ``cursor`` (may sit outside a preserved selection).
         if self._caret_visible():
             caret_x = inner_x + self._text_pixel_width(self._text[: self.cursor])
-            caret = self.font.render("|", True, self.caret_color)
+            caret_col = theme_value("color_caret", self.color_caret, self.theme_color())
+            caret = font.render("|", True, caret_col)
             surface.blit(caret, (caret_x - caret.get_width() // 2, inner_y))
 
-    def _draw_plain(self, surface: pygame.Surface, inner_x: int, inner_y: int) -> None:
-        assert self.font is not None
+    def _draw_plain(
+        self, surface: pygame.Surface, inner_x: int, inner_y: int, font: pygame.font.Font
+    ) -> None:
         if self._text:
-            img = self.font.render(self._text, True, self.text_color)
+            img = font.render(self._text, True, self.theme_color())
             surface.blit(img, (inner_x, inner_y))
 
-    def _draw_with_selection(self, surface: pygame.Surface, inner_x: int, inner_y: int) -> None:
-        assert self.font is not None
+    def _draw_with_selection(
+        self, surface: pygame.Surface, inner_x: int, inner_y: int, font: pygame.font.Font
+    ) -> None:
         a, b = self.selection_range()
         pre, mid, post = self._text[:a], self._text[a:b], self._text[b:]
         sel_fg, sel_bg = self._sel_colors()
         x = inner_x
         if pre:
-            img = self.font.render(pre, True, self.text_color)
+            img = font.render(pre, True, self.theme_color())
             surface.blit(img, (x, inner_y))
             x += img.get_width()
         if mid:
-            img = self.font.render(mid, True, sel_fg)
-            bar = pygame.Rect(x, inner_y, img.get_width(), self.font.get_height())
+            img = font.render(mid, True, sel_fg)
+            bar = pygame.Rect(x, inner_y, img.get_width(), font.get_height())
             pygame.draw.rect(surface, sel_bg, bar)
             surface.blit(img, (x, inner_y))
             x += img.get_width()
         if post:
-            img = self.font.render(post, True, self.text_color)
+            img = font.render(post, True, self.theme_color())
             surface.blit(img, (x, inner_y))
 
     # -- pointer / keyboard ---------------------------------------------------
@@ -361,7 +390,7 @@ class TextEntry(TextWidget):
 
     def _index_at_pos(self, pos: tuple[int, int], screen_size: ScreenSize) -> int:
         rect = self.screen_rect(screen_size)
-        local_x = pos[0] - rect.x - self.padding_px
+        local_x = pos[0] - rect.x - self.theme_padding()
         return self._index_for_x(local_x)
 
     def _index_for_x(self, local_x: int) -> int:

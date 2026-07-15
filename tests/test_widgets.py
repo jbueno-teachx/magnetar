@@ -55,6 +55,9 @@ def test_prompt_and_orbit_share_bottom_edge() -> None:
     pygame.font.init()
     try:
         app.font = pygame.font.Font(None, 18)
+        from magnetar.widgets import get_theme
+
+        get_theme().font = app.font
         app._build_ui()
         size = (1024, 768)
         assert app._orbit_button is not None and app._prompt_entry is not None
@@ -241,7 +244,7 @@ def test_text_entry_length_limited_to_widget_width() -> None:
     try:
         font = pygame.font.Font(None, 24)
         # Narrow field in pixel space: 10% of 200px = 20px wide → almost no chars.
-        entry = TextEntry(0, 0, 10, 50, font=font, padding_px=2)
+        entry = TextEntry(0, 0, 10, 50, font=font, padding=2)
         reg = WidgetRegistry()
         reg.add(entry)
         reg.focus = entry
@@ -252,7 +255,7 @@ def test_text_entry_length_limited_to_widget_width() -> None:
                 size,
             )
         assert entry.text
-        assert font.size(entry.text)[0] <= entry.screen_rect(size).width - 2 * entry.padding_px
+        assert font.size(entry.text)[0] <= entry.screen_rect(size).width - 2 * entry.theme_padding()
     finally:
         pygame.display.quit()
 
@@ -286,6 +289,9 @@ def test_app_builds_prompt_entry() -> None:
     pygame.font.init()
     try:
         app.font = pygame.font.Font(None, 18)
+        from magnetar.widgets import get_theme
+
+        get_theme().font = app.font
         app._build_ui()
         assert app._prompt_entry is not None
         assert app._prompt_entry in list(app.widgets)

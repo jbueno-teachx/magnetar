@@ -30,6 +30,7 @@ from magnetar.widgets import (
     TextPanel,
     WIDGET_SUBMIT,
     WidgetRegistry,
+    get_theme,
     make_curved_arrows_icon,
 )
 from magnetar.world import World
@@ -197,6 +198,8 @@ class MagnetarApp:
         self.clock = pygame.time.Clock()
         with hud_font_path() as font_file:
             self.font = pygame.font.Font(str(font_file), DEFAULT_HUD_FONT_SIZE)
+        # Inject the loaded typeface into the active widget theme (default cyan chrome).
+        get_theme().font = self.font
         self.profiler = FrameProfiler.from_env()
         if self.profiler is not None:
             self.widgets.profile_sink = self.profiler.add
@@ -445,9 +448,13 @@ class MagnetarApp:
     # -- in-window UI ---------------------------------------------------------
 
     def _build_ui(self) -> None:
-        """Create widgets once the display is available."""
+        """Create widgets once the display is available.
+
+        Chrome colors/padding/border come from the active widget theme
+        (:func:`magnetar.widgets.get_theme`); only layout and behaviour are set here.
+        """
         self.widgets.clear()
-        icon = make_curved_arrows_icon(128, color=THEME_COLOR, accent=AXIS_COLOR)
+        icon = make_curved_arrows_icon(128, accent=AXIS_COLOR)
         self._orbit_button = DragImageButton(
             ROTATE_WIDGET_X_PCT,
             ROTATE_WIDGET_Y_PCT,
@@ -468,10 +475,6 @@ class MagnetarApp:
             HUD_PANEL_H_PCT,
             anchor=HUD_PANEL_ANCHOR,
             name="hud",
-            font=self.font,
-            border=THEME_COLOR,
-            text_color=HUD_COLOR,
-            fill=(8, 16, 20, 180),
             scroll_to_end=False,
             closable=False,
         )
@@ -485,14 +488,9 @@ class MagnetarApp:
             PROMPT_OUT_H_PCT,
             anchor=PROMPT_OUT_ANCHOR,
             name="prompt_out",
-            font=self.font,
-            border=THEME_COLOR,
-            text_color=HUD_COLOR,
-            fill=(8, 16, 20, 200),
             scroll_to_end=True,
             max_lines=PROMPT_OUT_MAX_LINES,
             closable=True,
-            close_color=THEME_COLOR,
         )
         # Start hidden until the first command produces text.
         self._prompt_out.hide()
@@ -505,13 +503,7 @@ class MagnetarApp:
             PROMPT_WIDGET_H_PCT,
             name="prompt",
             anchor=PROMPT_WIDGET_ANCHOR,
-            font=self.font,
             placeholder="",
-            border=THEME_COLOR,
-            border_focused=(0, 255, 200),
-            text_color=THEME_COLOR,
-            placeholder_color=(0, 120, 120),
-            caret_color=THEME_COLOR,
         )
         self.widgets.add(self._prompt_entry)
         # Ready for typing without an extra click during this experiment.

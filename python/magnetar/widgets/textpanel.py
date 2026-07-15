@@ -19,6 +19,7 @@ from magnetar.widgets.base import (
     WidgetPointerEvent,
 )
 from magnetar.widgets.textbase import TextWidget
+from magnetar.widgets.theme import theme_value
 
 
 class TextPanel(TextWidget):
@@ -58,17 +59,22 @@ class TextPanel(TextWidget):
         text: str = "",
         name: str = "",
         command: Command = None,
-        fill: tuple[int, int, int, int] | None = (8, 16, 20, 200),
-        border: tuple[int, int, int] | None = (0, 255, 255),
-        text_color: tuple[int, int, int] = (0, 255, 255),
-        padding_px: int = 8,
-        line_gap_px: int = 2,
+        color: tuple[int, int, int] | None = None,
+        background: tuple[int, int, int, int] | None = None,
+        border: tuple[int, int, int] | None = None,
+        padding: int | None = None,
+        line_gap: int | None = None,
         scroll_to_end: bool = False,
         max_lines: int | None = 200,
         closable: bool = False,
         on_close: Command = None,
         close_size_px: int = 18,
         close_color: tuple[int, int, int] | None = None,
+        # Back-compat aliases
+        fill: tuple[int, int, int, int] | None = None,
+        text_color: tuple[int, int, int] | None = None,
+        padding_px: int | None = None,
+        line_gap_px: int | None = None,
     ) -> None:
         interest = EventInterest.CLICK if closable else EventInterest.NONE
         super().__init__(
@@ -82,12 +88,12 @@ class TextPanel(TextWidget):
             interest=interest,
             enabled=True,
             font=font,
-            fill=fill,
+            color=color if color is not None else text_color,
+            background=background if background is not None else fill,
             border=border,
-            text_color=text_color,
-            padding_px=padding_px,
+            padding=padding if padding is not None else padding_px,
         )
-        self.line_gap_px = int(line_gap_px)
+        self.line_gap = line_gap if line_gap is not None else line_gap_px
         self.scroll_to_end = bool(scroll_to_end)
         self.max_lines = max_lines
         self.closable = bool(closable)
@@ -218,24 +224,28 @@ class TextPanel(TextWidget):
     # -- layout helpers -------------------------------------------------------
 
     def line_height(self) -> int:
-        if self.font is None:
-            return 16 + self.line_gap_px
-        return self.font.get_height() + self.line_gap_px
+        gap = int(theme_value("line_gap", self.line_gap, 2))
+        font = self.theme_font()
+        if font is None:
+            return 16 + gap
+        return font.get_height() + gap
 
     def _text_padding_right(self, screen_size: ScreenSize) -> int:
         """Reserve space on the right so text does not draw under the close X."""
+        pad = self.theme_padding()
         if not self.closable:
-            return self.padding_px
+            return pad
         cr = self.close_rect(screen_size)
-        return max(self.padding_px, cr.width + 6)
+        return max(pad, cr.width + 6)
 
     def visible_line_capacity(self, screen_size: ScreenSize) -> int:
         """How many text rows fit inside the padded panel."""
         rect = self.screen_rect(screen_size)
-        top_pad = self.padding_px
+        pad = self.theme_padding()
+        top_pad = pad
         if self.closable:
             top_pad = max(top_pad, self.close_rect(screen_size).height + 2)
-        inner_h = max(0, rect.height - top_pad - self.padding_px)
+        inner_h = max(0, rect.height - top_pad - pad)
         lh = max(1, self.line_height())
         return max(0, inner_h // lh)
 
@@ -254,7 +264,7 @@ class TextPanel(TextWidget):
         cr = self.close_rect(screen_size)
         color = self.close_color
         if color is None:
-            color = self.border if self.border is not None else self.text_color
+            color = self.theme_border() or self.theme_color()
         plate = pygame.Surface(cr.size, pygame.SRCALPHA)
         plate.fill((0, 0, 0, 120))
         surface.blit(plate, cr.topleft)
@@ -271,48 +281,59 @@ class TextPanel(TextWidget):
             return
         rect = self.screen_rect(surface.get_size())
         screen_size = surface.get_size()
-        if self.fill is not None:
+        fill = self.theme_background(key="background")
+        if fill is not None:
             overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
-            overlay.fill(self.fill)
+            overlay.fill(fill)
             surface.blit(overlay, rect.topleft)
-        if self.border is not None:
-            pygame.draw.rect(surface, self.border, rect, width=1, border_radius=3)
+        border = self.theme_border()
+        if border is not None:
+            pygame.draw.rect(
+                surface,
+                border,
+                rect,
+                width=self.theme_border_width(),
+                border_radius=self.theme_border_radius(),
+            )
 
         if self.closable:
             self._draw_close_x(surface, screen_size)
 
-        if self.font is None:
+        font = self.theme_font()
+        if font is None:
             return
 
         visible = self._visible_slice(screen_size)
         if not visible:
             return
 
-        top_pad = self.padding_px
+        pad = self.theme_padding()
+        top_pad = pad
         if self.closable:
             top_pad = max(top_pad, self.close_rect(screen_size).height + 2)
-        x0 = rect.x + self.padding_px
+        x0 = rect.x + pad
         y = rect.y + top_pad
-        max_w = max(0, rect.width - self.padding_px - self._text_padding_right(screen_size))
+        max_w = max(0, rect.width - pad - self._text_padding_right(screen_size))
         lh = self.line_height()
-        bottom = rect.bottom - self.padding_px
+        bottom = rect.bottom - pad
+        color = self.theme_color()
 
         for line in visible:
-            if y + self.font.get_height() > bottom:
+            if y + font.get_height() > bottom:
                 break
             shown = line
-            if max_w > 0 and self.font.size(shown)[0] > max_w:
+            if max_w > 0 and font.size(shown)[0] > max_w:
                 lo, hi = 0, len(shown)
                 while lo < hi:
                     mid = (lo + hi + 1) // 2
-                    if self.font.size(shown[:mid])[0] <= max_w:
+                    if font.size(shown[:mid])[0] <= max_w:
                         lo = mid
                     else:
                         hi = mid - 1
                 shown = shown[:lo]
-                if lo > 1 and self.font.size(shown[:-1] + "…")[0] <= max_w:
+                if lo > 1 and font.size(shown[:-1] + "…")[0] <= max_w:
                     shown = shown[:-1] + "…"
             if shown:
-                img = self.font.render(shown, True, self.text_color)
+                img = font.render(shown, True, color)
                 surface.blit(img, (x0, y))
             y += lh

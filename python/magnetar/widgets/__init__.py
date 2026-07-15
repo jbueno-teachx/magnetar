@@ -34,6 +34,7 @@ from magnetar.widgets.registry import WidgetRegistry
 from magnetar.widgets.textbase import TextWidget
 from magnetar.widgets.textentry import TextEntry
 from magnetar.widgets.textpanel import TextPanel
+from magnetar.widgets.theme import DEFAULT_THEME, Theme, get_theme, set_theme
 
 __all__ = [
     "Anchor",
@@ -42,6 +43,7 @@ __all__ = [
     "AnchorLike",
     "Button",
     "Command",
+    "DEFAULT_THEME",
     "DragImageButton",
     "EventInterest",
     "HistoryTextEntry",
@@ -51,6 +53,7 @@ __all__ = [
     "TextEntry",
     "TextPanel",
     "TextWidget",
+    "Theme",
     "WIDGET_BLUR",
     "WIDGET_CHANGED",
     "WIDGET_FOCUS",
@@ -58,9 +61,11 @@ __all__ = [
     "Widget",
     "WidgetPointerEvent",
     "WidgetRegistry",
+    "get_theme",
     "init",
     "make_curved_arrows_icon",
     "quit",
+    "set_theme",
 ]
 
 
