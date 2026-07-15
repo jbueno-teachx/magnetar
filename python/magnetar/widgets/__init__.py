@@ -31,6 +31,7 @@ from magnetar.widgets.buttons import Button, DragImageButton, make_curved_arrows
 from magnetar.widgets.history_textentry import HistoryTextEntry
 from magnetar.widgets.keyevent import KeyEvent
 from magnetar.widgets.registry import WidgetRegistry
+from magnetar.widgets.textbase import TextWidget
 from magnetar.widgets.textentry import TextEntry
 from magnetar.widgets.textpanel import TextPanel
 
@@ -49,6 +50,7 @@ __all__ = [
     "ScreenSize",
     "TextEntry",
     "TextPanel",
+    "TextWidget",
     "WIDGET_BLUR",
     "WIDGET_CHANGED",
     "WIDGET_FOCUS",

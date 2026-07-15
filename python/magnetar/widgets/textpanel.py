@@ -16,12 +16,12 @@ from magnetar.widgets.base import (
     EventInterest,
     Point,
     ScreenSize,
-    Widget,
     WidgetPointerEvent,
 )
+from magnetar.widgets.textbase import TextWidget
 
 
-class TextPanel(Widget):
+class TextPanel(TextWidget):
     """Bordered, read-only multi-line text display.
 
     Placement uses the same percent + :class:`~magnetar.widgets.base.Anchor`
@@ -31,6 +31,9 @@ class TextPanel(Widget):
     - :meth:`append_line` / :meth:`append_text` grow the buffer
     - :meth:`write` places text at ``(row, column)`` (0-based) on the grid
     - :meth:`clear` empties the buffer
+
+    Equal content assignments are no-ops and do **not** raise the dirty flag
+    (see :class:`~magnetar.widgets.textbase.TextWidget`).
 
     Drawing clips to the panel height. When :attr:`scroll_to_end` is true and
     more lines exist than fit, the **last** lines are shown (log-style).
@@ -78,12 +81,12 @@ class TextPanel(Widget):
             name=name or "textpanel",
             interest=interest,
             enabled=True,
+            font=font,
+            fill=fill,
+            border=border,
+            text_color=text_color,
+            padding_px=padding_px,
         )
-        self.font = font
-        self.fill = fill
-        self.border = border
-        self.text_color = text_color
-        self.padding_px = int(padding_px)
         self.line_gap_px = int(line_gap_px)
         self.scroll_to_end = bool(scroll_to_end)
         self.max_lines = max_lines
@@ -91,7 +94,9 @@ class TextPanel(Widget):
         self.on_close = on_close
         self.close_size_px = max(10, int(close_size_px))
         self.close_color = close_color
-        self._lines: list[str] = []
+        # Multi-line content key starts empty.
+        self._content_key = ()
+        self._dirty = False
         if lines is not None:
             self.set_lines(lines)
         elif text:
@@ -102,61 +107,71 @@ class TextPanel(Widget):
     @property
     def lines(self) -> list[str]:
         """Copy of the current line buffer."""
-        return list(self._lines)
+        key = self._content_key
+        if isinstance(key, tuple):
+            return list(key)
+        return []
+
+    def _apply_max(self, rows: list[str]) -> list[str]:
+        if self.max_lines is not None and self.max_lines > 0 and len(rows) > self.max_lines:
+            return rows[-int(self.max_lines) :]
+        return rows
+
+    @staticmethod
+    def _flatten(lines: Iterable[str]) -> list[str]:
+        flat: list[str] = []
+        for line in lines:
+            for part in str(line).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+                flat.append(part)
+        return flat
 
     def clear(self) -> None:
-        self._lines.clear()
+        self.commit_lines(())
 
-    def set_lines(self, lines: list[str] | tuple[str, ...] | Iterable[str]) -> None:
-        """Replace all content with ``lines`` (each item one row)."""
-        self._lines = [str(line).replace("\r\n", "\n").replace("\r", "\n") for line in lines]
-        flat: list[str] = []
-        for line in self._lines:
-            flat.extend(line.split("\n"))
-        self._lines = flat
-        self._trim()
+    def set_lines(self, lines: list[str] | tuple[str, ...] | Iterable[str]) -> bool:
+        """Replace all content with ``lines``. Return True if content changed."""
+        flat = self._apply_max(self._flatten(lines))
+        return self.commit_lines(flat)
 
-    def set_text(self, text: str) -> None:
+    def set_text(self, text: str) -> bool:
         """Replace content from a single string (split on newlines)."""
-        self.set_lines(str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n"))
+        return self.set_lines(str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n"))
 
-    def append_line(self, line: str = "") -> None:
-        """Append one logical line (embedded newlines become extra rows)."""
+    def append_line(self, line: str = "") -> bool:
+        """Append one logical line. Return True if content changed."""
+        rows = self.lines
         for part in str(line).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-            self._lines.append(part)
-        self._trim()
+            rows.append(part)
+        return self.commit_lines(self._apply_max(rows))
 
-    def append_text(self, text: str) -> None:
+    def append_text(self, text: str) -> bool:
         """Append multi-line text (same as successive :meth:`append_line`)."""
-        self.append_line(text)
+        return self.append_line(text)
 
-    def write(self, row: int, col: int, text: str) -> None:
+    def write(self, row: int, col: int, text: str) -> bool:
         """Place ``text`` starting at grid cell ``(row, col)`` (0-based).
 
         Expands the buffer with blank lines / spaces as needed. If ``text``
         contains newlines, subsequent segments continue on the next rows at
-        column 0.
+        column 0. Return True if content changed.
         """
         if row < 0 or col < 0:
             raise ValueError(f"row and col must be >= 0 (got row={row}, col={col})")
+        rows = self.lines
         parts = str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n")
         for i, part in enumerate(parts):
             r = row + i
             c = col if i == 0 else 0
-            while len(self._lines) <= r:
-                self._lines.append("")
-            line = self._lines[r]
+            while len(rows) <= r:
+                rows.append("")
+            line = rows[r]
             if len(line) < c:
                 line = line + (" " * (c - len(line)))
             end = c + len(part)
             if len(line) < end:
                 line = line + (" " * (end - len(line)))
-            self._lines[r] = line[:c] + part + line[end:]
-        self._trim()
-
-    def _trim(self) -> None:
-        if self.max_lines is not None and self.max_lines > 0 and len(self._lines) > self.max_lines:
-            self._lines = self._lines[-int(self.max_lines) :]
+            rows[r] = line[:c] + part + line[end:]
+        return self.commit_lines(self._apply_max(rows))
 
     def show(self) -> None:
         """Make the panel visible again (e.g. after close when new output arrives)."""
@@ -172,7 +187,6 @@ class TextPanel(Widget):
         """Pixel rect of the upper-right ``X`` hit target (inside the border)."""
         rect = self.screen_rect(screen_size)
         size = min(self.close_size_px, max(10, rect.width // 4), max(10, rect.height // 2))
-        # Inset slightly so the X sits on the border corner, not outside.
         inset = 2
         return pygame.Rect(
             rect.right - size - inset,
@@ -218,7 +232,6 @@ class TextPanel(Widget):
     def visible_line_capacity(self, screen_size: ScreenSize) -> int:
         """How many text rows fit inside the padded panel."""
         rect = self.screen_rect(screen_size)
-        # When closable, top padding accounts for the close control height.
         top_pad = self.padding_px
         if self.closable:
             top_pad = max(top_pad, self.close_rect(screen_size).height + 2)
@@ -227,21 +240,21 @@ class TextPanel(Widget):
         return max(0, inner_h // lh)
 
     def _visible_slice(self, screen_size: ScreenSize) -> list[str]:
+        rows = self.lines
         cap = self.visible_line_capacity(screen_size)
-        if cap <= 0 or not self._lines:
+        if cap <= 0 or not rows:
             return []
-        if len(self._lines) <= cap:
-            return self._lines
+        if len(rows) <= cap:
+            return rows
         if self.scroll_to_end:
-            return self._lines[-cap:]
-        return self._lines[:cap]
+            return rows[-cap:]
+        return rows[:cap]
 
     def _draw_close_x(self, surface: pygame.Surface, screen_size: ScreenSize) -> None:
         cr = self.close_rect(screen_size)
         color = self.close_color
         if color is None:
             color = self.border if self.border is not None else self.text_color
-        # Subtle corner plate so the X reads as part of the chrome.
         plate = pygame.Surface(cr.size, pygame.SRCALPHA)
         plate.fill((0, 0, 0, 120))
         surface.blit(plate, cr.topleft)

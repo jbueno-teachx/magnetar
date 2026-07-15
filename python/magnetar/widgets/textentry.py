@@ -19,14 +19,14 @@ from magnetar.widgets.base import (
     WIDGET_CHANGED,
     WIDGET_FOCUS,
     WIDGET_SUBMIT,
-    Widget,
     WidgetPointerEvent,
 )
 from magnetar.widgets.clipboard import ClipboardError, get_text, set_text
 from magnetar.widgets.keyevent import KeyEvent
+from magnetar.widgets.textbase import TextWidget
 
 
-class TextEntry(Widget):
+class TextEntry(TextWidget):
     """Single-line text field with a ``|`` caret and optional selection.
 
     Keyboard handling runs only while :attr:`focused`. Length is limited so the
@@ -111,20 +111,20 @@ class TextEntry(Widget):
             command=command,
             name=name or "textentry",
             interest=EventInterest.CLICK | EventInterest.KEY | EventInterest.DRAG,
+            font=font,
+            fill=fill,
+            border=border,
+            text_color=text_color,
+            padding_px=padding_px,
         )
-        self.font = font
-        self._text = str(text)
+        self.commit_text(str(text))
         self.placeholder = placeholder
-        self.fill = fill
-        self.border = border
         self.border_focused = border_focused
-        self.text_color = text_color
         self.placeholder_color = placeholder_color
         self.caret_color = caret_color
         # Reverse video defaults: invert text/fill for selected span.
         self.selection_fg = selection_fg
         self.selection_bg = selection_bg
-        self.padding_px = int(padding_px)
         self.caret_blink_ms = int(caret_blink_ms)
         self.focused = False
         self.cursor = len(self._text)
@@ -141,21 +141,29 @@ class TextEntry(Widget):
     # -- text / caret / selection ---------------------------------------------
 
     @property
+    def _text(self) -> str:
+        """Working buffer (backed by :attr:`content_key` for equality / dirty)."""
+        key = self._content_key
+        return key if isinstance(key, str) else ""
+
+    @_text.setter
+    def _text(self, value: str) -> None:
+        self.commit_text(str(value))
+
+    @property
     def text(self) -> str:
         return self._text
 
     @text.setter
     def text(self, value: str) -> None:
-        self._text = str(value)
+        if not self.commit_text(str(value)):
+            return
         n = len(self._text)
         self.cursor = min(self.cursor, n)
         if self._sel is not None:
             a, b = self._sel
             a, b = min(a, n), min(b, n)
             self._sel = (a, b) if a != b else None
-
-    def set_font(self, font: pygame.font.Font | None) -> None:
-        self.font = font
 
     def has_selection(self) -> bool:
         return self._sel is not None and self._sel[0] != self._sel[1]
@@ -194,11 +202,11 @@ class TextEntry(Widget):
     def clear(self, *, notify: bool = True) -> None:
         if not self._text and self.cursor == 0:
             return
-        self._text = ""
+        changed = self.commit_text("")
         self.cursor = 0
         self.clear_selection()
         self._nudge_caret()
-        if notify:
+        if notify and changed:
             self.post_event(WIDGET_CHANGED, text=self._text, cursor=self.cursor)
 
     def _nudge_caret(self) -> None:
