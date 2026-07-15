@@ -191,20 +191,19 @@ def test_registry_dispatches_close_click() -> None:
 def test_set_lines_equal_is_noop_dirty() -> None:
     panel = TextPanel(0, 0, 20, 20)
     assert panel.set_lines(["a", "b"]) is True
-    assert panel.dirty is True
-    panel.mark_clean()
-    assert panel.dirty is False
+    assert panel._dirty is True
+    panel._dirty = False
     assert panel.set_lines(["a", "b"]) is False
-    assert panel.dirty is False
-    assert panel.content_key == ("a", "b")
+    assert panel._dirty is False
+    assert panel._content_key == ("a", "b")
     # draw_hud-style spam
     for _ in range(50):
         assert panel.set_lines(["a", "b"]) is False
-    assert panel.dirty is False
+    assert panel._dirty is False
 
 
 def test_append_marks_dirty() -> None:
     panel = TextPanel(0, 0, 20, 20)
-    panel.mark_clean()
+    panel._dirty = False
     assert panel.append_line("x") is True
-    assert panel.dirty is True
+    assert panel._dirty is True

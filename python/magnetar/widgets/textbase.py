@@ -25,10 +25,11 @@ class TextWidget(Widget):
     should call :meth:`commit_text` / :meth:`commit_lines` so that assigning
     *equal* content is a no-op and does **not** set the dirty flag.
 
-    The dirty flag means "rasterized text may be stale" (for future surface /
-    glyph caches). The screen is still fully cleared each frame by the app, so
-    :meth:`draw` still runs every frame; dirty only gates *rebuilding* cached
-    glyphs when a cache exists, and documents content identity for profilers.
+    ``_dirty`` means rasterized text may be stale (for future surface / glyph
+    caches). The screen is still fully cleared each frame by the app, so
+    :meth:`draw` still runs every frame; ``_dirty`` only gates *rebuilding*
+    cached glyphs when a cache exists. Use the attribute directly inside this
+    package — no getter/setter wrappers.
     """
 
     def __init__(
@@ -67,37 +68,17 @@ class TextWidget(Widget):
         self.border = border
         self.text_color = text_color
         self.padding_px = int(padding_px)
+        # Paint/content invalidation for glyph/surface caches (widgets package only).
         self._dirty: bool = True
         # Canonical content fingerprint for equality short-circuit.
         # TextEntry: str; TextPanel: tuple[str, ...].
         self._content_key: str | tuple[str, ...] = ""
 
-    # -- dirty flag -----------------------------------------------------------
-
-    @property
-    def dirty(self) -> bool:
-        return self._dirty
-
-    def mark_dirty(self) -> None:
-        """Force a content/paint invalidation (theme, font, geometry, …)."""
-        self._dirty = True
-
-    def mark_clean(self) -> None:
-        """Clear the dirty flag after a successful cache rebuild."""
-        self._dirty = False
-
     def set_font(self, font: pygame.font.Font | None) -> None:
         if font is self.font:
             return
         self.font = font
-        self.mark_dirty()
-
-    # -- content identity -----------------------------------------------------
-
-    @property
-    def content_key(self) -> str | tuple[str, ...]:
-        """Immutable snapshot of current textual content (for tests / equality)."""
-        return self._content_key
+        self._dirty = True
 
     def commit_text(self, text: str) -> bool:
         """Set single-string content. Return True if it actually changed."""

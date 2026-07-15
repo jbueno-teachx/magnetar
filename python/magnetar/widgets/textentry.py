@@ -142,7 +142,7 @@ class TextEntry(TextWidget):
 
     @property
     def _text(self) -> str:
-        """Working buffer (backed by :attr:`content_key` for equality / dirty)."""
+        """Working buffer (backed by ``_content_key`` for equality / dirty)."""
         key = self._content_key
         return key if isinstance(key, str) else ""
 
