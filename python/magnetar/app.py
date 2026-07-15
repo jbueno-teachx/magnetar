@@ -19,6 +19,7 @@ import pygame
 
 from magnetar.assets import DEFAULT_HUD_FONT_SIZE, hud_font_path
 from magnetar.prompt import Prompt
+from magnetar.ui_profile import FrameProfiler
 from magnetar.units import coulomb, gram, meters, second
 from magnetar.view3d import ViewCamera
 from magnetar import widgets as widgets_pkg
@@ -173,6 +174,8 @@ class MagnetarApp:
         self._prompt_entry: HistoryTextEntry | None = None
         self._hud_panel: TextPanel | None = None
         self._prompt_out: TextPanel | None = None
+        # Optional UI/frame profiler (MAGNETAR_PROFILE_UI=1).
+        self.profiler: FrameProfiler | None = None
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -194,6 +197,9 @@ class MagnetarApp:
         self.clock = pygame.time.Clock()
         with hud_font_path() as font_file:
             self.font = pygame.font.Font(str(font_file), DEFAULT_HUD_FONT_SIZE)
+        self.profiler = FrameProfiler.from_env()
+        if self.profiler is not None:
+            self.widgets.profile_sink = self.profiler.add
         self._build_ui()
 
     def _quit(self) -> None:
@@ -205,14 +211,28 @@ class MagnetarApp:
         """Main loop only: tick → events → step → draw → flip."""
         assert self.screen is not None and self.clock is not None and self.font is not None
         self.running = True
+        prof = self.profiler
         while True:
             dt = second(self.clock.tick(TARGET_FPS) / 1000.0)
-            self.events()
-            if not self.running:
-                break
-            self.world.step(dt)
-            self.render_frame()
-            pygame.display.flip()
+            if prof is None:
+                self.events()
+                if not self.running:
+                    break
+                self.world.step(dt)
+                self.render_frame()
+                pygame.display.flip()
+            else:
+                with prof.bucket("frame"):
+                    with prof.bucket("events"):
+                        self.events()
+                    if not self.running:
+                        break
+                    with prof.bucket("world_step"):
+                        self.world.step(dt)
+                    self.render_frame()
+                    with prof.bucket("flip"):
+                        pygame.display.flip()
+                prof.end_frame()
             self.tick += 1
         return 0
 
@@ -392,6 +412,22 @@ class MagnetarApp:
 
     def render_frame(self) -> None:
         assert self.screen is not None
+        prof = self.profiler
+        if prof is None:
+            self._render_world()
+            self.draw_hud()
+            self.widgets.draw(self.screen)
+            return
+        with prof.bucket("world_draw"):
+            self._render_world()
+        with prof.bucket("hud_update"):
+            self.draw_hud()
+        with prof.bucket("widgets_draw"):
+            self.widgets.draw(self.screen)
+
+    def _render_world(self) -> None:
+        """Clear, axes, particles (everything under the UI)."""
+        assert self.screen is not None
         self.screen.fill(BACKGROUND_COLOR)
         self.draw_axes()
 
@@ -405,9 +441,6 @@ class MagnetarApp:
             group.change_layer(sprite, int(-float(depth) * 1000.0))
         # Group.draw blits each sprite.image at sprite.rect (ScreenSprite properties).
         group.draw(self.screen)
-
-        self.draw_hud()
-        self.widgets.draw(self.screen)
 
     # -- in-window UI ---------------------------------------------------------
 

@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import os
-from typing import Iterable
+import time
+from typing import Callable, Iterable
 
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
@@ -12,6 +13,9 @@ import pygame
 
 from magnetar.widgets.base import EventInterest, Point, ScreenSize, Widget, WidgetPointerEvent
 from magnetar.widgets.textentry import TextEntry
+
+# Optional: (bucket_name, seconds) → used when app enables UI profiling.
+ProfileSink = Callable[[str, float], None]
 
 
 class WidgetRegistry:
@@ -23,6 +27,8 @@ class WidgetRegistry:
         self._down_widget: Widget | None = None
         self._down_pos: Point | None = None
         self._focus: Widget | None = None
+        # When set, :meth:`draw` reports per-widget times as ``widget.<name>``.
+        self.profile_sink: ProfileSink | None = None
 
     def add(self, widget: Widget) -> Widget:
         self._widgets.append(widget)
@@ -172,6 +178,13 @@ class WidgetRegistry:
         return consumed
 
     def draw(self, surface: pygame.Surface) -> None:
+        sink = self.profile_sink
         for widget in self._widgets:
-            if widget.visible:
+            if not widget.visible:
+                continue
+            if sink is None:
                 widget.draw(surface)
+                continue
+            t0 = time.perf_counter()
+            widget.draw(surface)
+            sink(f"widget.{widget.name}", time.perf_counter() - t0)

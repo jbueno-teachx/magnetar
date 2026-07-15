@@ -1,0 +1,22 @@
+{
+  "meta": {
+    "frames": 200,
+    "resolution": [
+      1024,
+      768
+    ],
+    "pygame": "2.5.7",
+    "python": "3.14.0",
+    "generated_at": "2026-07-14T21:21:58-0300"
+  },
+  "ms": {
+    "draw_hud_ms": 0.011523510002007242,
+    "hud_panel_draw_ms": 0.4100167750220862,
+    "widgets_draw_hidden_out_ms": 0.7316040199657436,
+    "widgets_draw_open_out_ms": 1.2719604700032505,
+    "prompt_out_draw_ms": 0.5591451250074897,
+    "render_frame_ms": 2.122135610006808,
+    "render_frame_flip_ms": 3.8659559200095828,
+    "budget_60fps_ms": 16.666666666666668
+  }
+}

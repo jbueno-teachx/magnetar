@@ -1,0 +1,7 @@
+# Keep directory; ignore bulky live dumps by default.
+ui_frames_*.jsonl
+ui_bench_latest.json
+*
+!.gitignore
+!baselines/
+!baselines/**
