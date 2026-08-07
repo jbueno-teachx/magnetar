@@ -1,0 +1,23 @@
+# Project-scoped MCP for magnetar (committed).
+#
+# GitHub hosts a native streamable-HTTP MCP. Grok talks to it directly
+# (OAuth in the TUI). Do not wrap this in npx/docker — this machine may
+# not have Node or Docker, and Grok handles HTTP + OAuth itself.
+#
+# Auth: /mcps → select github → i (browser OAuth).
+# Tokens: ~/.grok/mcp_credentials.json (mode 0600) — never this repo.
+#
+# Optional PAT instead of OAuth (export before launching grok; do not commit):
+#   [mcp_servers.github.headers]
+#   Authorization = "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"
+#
+# Guide: docs/github-mcp.md
+# Skill: .grok/skills/github-mcp/SKILL.md
+
+[mcp_servers.github]
+url = "https://api.githubcopilot.com/mcp/"
+enabled = true
+startup_timeout_sec = 60
+
+[mcp_servers.github.headers]
+X-MCP-Toolsets = "repos,issues,pull_requests,actions"
